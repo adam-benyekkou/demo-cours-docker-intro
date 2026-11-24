@@ -18,9 +18,6 @@ terraform.rc
 .env
 .env.*
 !.env.example
-stack/tls/
-stack/secrets/
-stack/traefik/local-dynamic/
 
 # Build
 **/bin/

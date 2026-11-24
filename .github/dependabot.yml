@@ -15,11 +15,6 @@ updates:
     directory: /stack
     schedule:
       interval: weekly
-    ignore:
-      # cAdvisor 0.53+ needs the containerd gRPC socket, which the socket proxy
-      # cannot provide (see docs/securite.md).
-      - dependency-name: gcr.io/cadvisor/cadvisor
-        versions: [">=0.53.0"]
 
   - package-ecosystem: terraform
     directory: /infra
