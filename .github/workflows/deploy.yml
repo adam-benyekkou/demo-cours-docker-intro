@@ -48,10 +48,15 @@ jobs:
           GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
           EOF
 
+          # The previous run left this file 0400 and owned by Grafana's uid; the
+          # directory is ours, so removing it is allowed. chmod must precede chown:
+          # once the file belongs to 472 this user can no longer change its mode.
           install -d -m 0755 stack/secrets
-          printf '%s' "$GRAFANA_ADMIN_PASSWORD" > stack/secrets/grafana_admin_password
-          sudo -n chown 472:472 stack/secrets/grafana_admin_password
-          chmod 0400 stack/secrets/grafana_admin_password
+          secret=stack/secrets/grafana_admin_password
+          rm -f "$secret"
+          printf '%s' "$GRAFANA_ADMIN_PASSWORD" > "$secret"
+          chmod 0400 "$secret"
+          sudo -n chown 472:472 "$secret"
 
       - name: Build image
         run: docker build -t "${APP_IMAGE}:${GITHUB_SHA}" app/
