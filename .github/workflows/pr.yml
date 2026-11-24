@@ -30,7 +30,11 @@ jobs:
         run: terraform fmt -check -recursive
 
       # No Azure credentials in CI: `terraform plan` needs the remote state and a
-      # token, so it is run by hand (see README). Validate needs neither.
+      # token, so it is run by hand (see README). Validate needs neither, as long
+      # as the backend is not initialised.
+      - name: init
+        run: terraform init -backend=false -input=false
+
       - name: validate
         run: terraform validate
 
