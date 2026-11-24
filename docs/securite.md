@@ -40,20 +40,17 @@ d'architecture correspondantes sont dans [exploitation.md](exploitation.md).
 
 ## Limites connues
 
-- **cAdvisor garde un accès direct à `/var/run/docker.sock`.** Depuis la
-  v0.53.0, sa fabrique Docker ouvre aussi le socket gRPC de containerd, qu'un
-  proxy HTTP (`docker-socket-proxy`) ne peut pas fournir. Un cAdvisor compromis
-  reste donc équivalent à root sur l'hôte. Le reste de la stack n'a pas cet
-  accès.
-- **Métriques par conteneur.** Elles dépendent du moteur Docker de l'hôte
-  (cgroups v2, snapshotters containerd) : à vérifier sur la VM après un
-  changement de version de Docker.
-- **Le dashboard « Conteneurs » est vide.** cAdvisor remonte la machine et les
-  cgroups, mais aucune série par conteneur nommé (`container_cpu_usage_seconds_total{name!=""}`
-  est vide), en local comme sur la VM : il ne retrouve pas la couche inscriptible des
-  conteneurs avec le moteur Docker récent. Les métriques de l'hôte, de Traefik
-  et de l'application ne sont pas touchées. À reprendre avec une autre version
-  de cAdvisor ou un autre mode de stockage Docker.
+- **cAdvisor est figé en v0.52.0.** Il lit les conteneurs à travers le
+  socket-proxy et ne monte aucun socket, ce qui évite qu'un cAdvisor compromis
+  soit root sur l'hôte. Dès la v0.53.0, sa fabrique Docker exige aussi le socket
+  gRPC de containerd, qu'un proxy HTTP ne peut pas fournir : monter cette version
+  redonnerait un accès root à cAdvisor. Dependabot ignore donc ces versions.
+- **Les noms de conteneurs demandent le stockage Docker `overlay2`.** Docker 29
+  active par défaut le snapshotter containerd, avec lequel cAdvisor ne retrouve
+  pas la couche inscriptible des conteneurs : le dashboard « Conteneurs » reste
+  alors vide. `infra/cloud-init.yml` écrit `/etc/docker/daemon.json` pour la VM.
+  En test local, le même réglage est nécessaire dans Docker, sinon ce dashboard
+  est vide ; l'hôte, Traefik et l'application ne sont pas touchés.
 - **Pas de `CAP_SYSLOG` pour cAdvisor** (`cap_drop: ALL`). Sous Ubuntu, où
   `dmesg_restrict` vaut 1, la lecture de `/dev/kmsg` échoue et le watcher OOM est
   désactivé. Les métriques CPU / mémoire / réseau ne sont pas affectées.
