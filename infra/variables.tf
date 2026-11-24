@@ -12,7 +12,7 @@ variable "prefix" {
 variable "location" {
   description = "Azure region for the resource group lookup and the budget."
   type        = string
-  default     = "francecentral"
+  default     = "spaincentral"
 }
 
 variable "resource_group_name" {
@@ -30,12 +30,6 @@ variable "admin_username" {
     condition     = can(regex("^[a-z][a-z0-9_-]{0,31}$", var.admin_username))
     error_message = "admin_username must start with a lowercase letter and contain only lowercase letters, digits, underscores or hyphens."
   }
-}
-
-variable "repo_url" {
-  description = "Git repository cloned on the VM by cloud-init, and by the deploy script."
-  type        = string
-  default     = "https://github.com/adam-benyekkou/demo-cours-docker-intro.git"
 }
 
 variable "admin_ssh_public_key" {
@@ -62,7 +56,7 @@ variable "dns_label" {
 variable "vm_size" {
   description = "Azure VM size for the demo host."
   type        = string
-  default     = "Standard_B2s"
+  default     = "Standard_D2s_v4"
 }
 
 variable "data_disk_size_gb" {

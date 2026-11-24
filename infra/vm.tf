@@ -22,21 +22,19 @@ resource "azurerm_linux_virtual_machine" "main" {
     storage_account_type = "StandardSSD_LRS"
   }
 
-  # Canonical:0001-com-ubuntu-server-noble:24_04-lts:latest (Ubuntu 24.04 LTS server).
+  # Canonical:ubuntu-24_04-lts:server:latest — Ubuntu 24.04 LTS, Gen2.
+  # The older `0001-com-ubuntu-server-noble` offer is no longer published in
+  # every region; this one resolves in every allowed region.
   source_image_reference {
     publisher = "Canonical"
-    offer     = "0001-com-ubuntu-server-noble"
-    sku       = "24_04-lts"
+    offer     = "ubuntu-24_04-lts"
+    sku       = "server"
     version   = "latest"
   }
 
   custom_data = base64encode(templatefile("${path.module}/cloud-init.yml", {
-    app_dir        = "/opt/demo-stack"
-    admin_username = var.admin_username
-    data_mount     = "/data"
-    data_device    = "/dev/disk/azure/scsi1/lun0"
-    git_url        = var.repo_url
-    git_branch     = "main"
+    data_mount  = "/data"
+    data_device = "/dev/disk/azure/scsi1/lun0"
   }))
 
   lifecycle {

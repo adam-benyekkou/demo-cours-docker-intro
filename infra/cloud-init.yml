@@ -1,8 +1,9 @@
+#cloud-config
 # Rendered by terraform templatefile(): dollar-brace expressions are Terraform
 # variables, bare $NAME are shell variables evaluated on the VM at first boot.
 #
 # This file must never write the stack environment file nor start the compose
-# stack: CI owns both. It only prepares the host.
+# stack: the GitHub Actions runner owns both. It only prepares the host.
 
 package_update: true
 package_upgrade: false
@@ -99,8 +100,12 @@ runcmd:
   - [bash, /usr/local/sbin/setup-data-disk.sh]
   - [bash, /usr/local/sbin/setup-docker.sh]
   - |
-    APP_DIR="${app_dir}"
-    if [ ! -d "$APP_DIR/.git" ]; then
-      git clone --branch "${git_branch}" --single-branch "${git_url}" "$APP_DIR"
-    fi
-    chown -R "${admin_username}:${admin_username}" "$APP_DIR"
+    # Account the self-hosted GitHub Actions runner will run as. It drives
+    # Docker, so it is root-equivalent whatever we do; it has no login shell.
+    # Its work directory lives on the data disk: dotnet builds are large.
+    id -u ghrunner >/dev/null 2>&1 \
+      || useradd --create-home --home-dir /data/actions-runner --shell /usr/sbin/nologin ghrunner
+    usermod -aG docker ghrunner
+    install -d -o ghrunner -g ghrunner -m 0755 /data/actions-runner
+    printf 'ghrunner ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/90-ghrunner
+    chmod 0440 /etc/sudoers.d/90-ghrunner
