@@ -3,21 +3,13 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace DemoApp.Controllers;
 
-public class HomeController : Controller
+public class HomeController(AppInfo info) : Controller
 {
-    private static readonly DateTimeOffset StartedAt = DateTimeOffset.UtcNow;
-
     public IActionResult Index()
     {
-        ViewData["Host"] = Environment.MachineName;
-        ViewData["Environment"] = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
-        ViewData["Version"] = Environment.GetEnvironmentVariable("APP_VERSION") ?? "dev";
-        ViewData["Runtime"] = Environment.Version.ToString();
-        ViewData["StartedAt"] = StartedAt.ToString("u");
-        ViewData["Uptime"] = (DateTimeOffset.UtcNow - StartedAt).ToString(@"d\.hh\:mm\:ss");
-        ViewData["Requests"] = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        ViewData["ClientAddress"] = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         ViewData["ForwardedFor"] = Request.Headers["X-Forwarded-For"].ToString();
-        return View();
+        return View(info);
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
