@@ -32,6 +32,22 @@ variable "admin_username" {
   }
 }
 
+variable "repo_url" {
+  description = "Git repository cloned on the VM by cloud-init, and by the deploy script."
+  type        = string
+  default     = "https://github.com/adam-benyekkou/demo-cours-docker-intro.git"
+}
+
+variable "admin_ssh_public_key" {
+  description = "OpenSSH public key installed for admin_username. Break-glass only: no port is open."
+  type        = string
+
+  validation {
+    condition     = can(regex("^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256) ", var.admin_ssh_public_key))
+    error_message = "admin_ssh_public_key must be an OpenSSH public key (ssh-ed25519, ssh-rsa or ecdsa-sha2-nistp256)."
+  }
+}
+
 variable "dns_label" {
   description = "DNS label for the public IP, giving <dns_label>.<location>.cloudapp.azure.com. Must be unique in the region."
   type        = string

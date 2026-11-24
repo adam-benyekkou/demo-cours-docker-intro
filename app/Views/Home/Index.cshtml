@@ -1,3 +1,4 @@
+@model AppInfo
 @{
     ViewData["Title"] = "Accueil";
 }
@@ -13,19 +14,19 @@
     <article class="card">
         <h2>Hôte</h2>
         <dl>
-            <dt>Nom du conteneur</dt><dd>@ViewData["Host"]</dd>
-            <dt>Environnement</dt><dd>@ViewData["Environment"]</dd>
-            <dt>Version</dt><dd>@ViewData["Version"]</dd>
-            <dt>Runtime .NET</dt><dd>@ViewData["Runtime"]</dd>
+            <dt>Nom du conteneur</dt><dd>@Model.Host</dd>
+            <dt>Environnement</dt><dd>@Model.Environment</dd>
+            <dt>Version</dt><dd>@Model.Version</dd>
+            <dt>Runtime .NET</dt><dd>@Model.Runtime</dd>
         </dl>
     </article>
 
     <article class="card">
         <h2>Cycle de vie</h2>
         <dl>
-            <dt>Démarré à</dt><dd>@ViewData["StartedAt"]</dd>
-            <dt>Disponibilité</dt><dd>@ViewData["Uptime"]</dd>
-            <dt>Adresse vue par l'appli</dt><dd>@ViewData["Requests"]</dd>
+            <dt>Démarré à</dt><dd>@Model.StartedAt.ToString("u")</dd>
+            <dt>Disponibilité</dt><dd>@Model.Uptime</dd>
+            <dt>Adresse client vue par l'appli</dt><dd>@ViewData["ClientAddress"]</dd>
             <dt>X-Forwarded-For</dt><dd>@ViewData["ForwardedFor"]</dd>
         </dl>
     </article>
@@ -33,12 +34,11 @@
     <article class="card">
         <h2>Observabilité</h2>
         <p>
-            <a href="/metrics">Métriques Prometheus</a> de l'application,
-            scrapées par le service <code>prometheus</code>.
+            Métriques Prometheus et cibles de collecte internes au réseau Docker :
+            elles ne sont pas publiées sur Internet.
         </p>
         <p>
-            Dashboards : <a href="/grafana/">Grafana</a>. Les cibles
-            Prometheus ne sont pas exposées sur Internet.
+            Dashboards : <a href="/grafana/">Grafana</a>.
         </p>
     </article>
 </section>

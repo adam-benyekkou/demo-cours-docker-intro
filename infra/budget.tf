@@ -3,7 +3,7 @@ resource "azurerm_consumption_budget_resource_group" "main" {
   # TF_VAR_budget_contact_emails (or BUDGET_CONTACT_EMAILS in CI) to enable it.
   count = length(var.budget_contact_emails) > 0 ? 1 : 0
 
-  name              = "${local.prefix}-budget"
+  name              = "${var.prefix}-budget"
   resource_group_id = data.azurerm_resource_group.main.id
   amount            = var.budget_amount
   time_grain        = "Monthly"

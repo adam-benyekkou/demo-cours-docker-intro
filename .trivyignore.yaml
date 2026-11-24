@@ -1,0 +1,24 @@
+# Deliberate exceptions for `trivy config`. Every entry states why the finding
+# is accepted; keep them few and specific.
+misconfigurations:
+  - id: AZU-0047
+    paths:
+      - infra/network.tf
+    statement: >-
+      Ports 80 and 443 are the public entrypoint of the demo. Everything else on
+      the NSG is denied by default, and no administration port is open.
+
+  - id: AZU-0068
+    paths:
+      - infra/network.tf
+    statement: >-
+      False positive: the NSG is attached through
+      azurerm_subnet_network_security_group_association, which the scan of the
+      subnet block does not follow.
+
+  - id: AZU-0076
+    paths:
+      - infra/network.tf
+    statement: >-
+      The demo is served from a single public IP, that is the point of the
+      exercise. Traefik terminates TLS and only exposes 80/443.

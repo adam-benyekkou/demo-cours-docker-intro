@@ -22,9 +22,3 @@ output "resource_group_location" {
   description = "Azure region of the stack."
   value       = data.azurerm_resource_group.main.location
 }
-
-output "ssh_private_key_pem" {
-  description = "PEM private key matching the administrator key installed on the VM."
-  value       = tls_private_key.admin.private_key_pem
-  sensitive   = true
-}

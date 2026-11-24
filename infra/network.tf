@@ -1,13 +1,13 @@
 resource "azurerm_virtual_network" "main" {
-  name                = "${local.prefix}-vnet"
-  location            = local.location
+  name                = "${var.prefix}-vnet"
+  location            = var.location
   resource_group_name = data.azurerm_resource_group.main.name
   address_space       = ["10.20.0.0/16"]
-  tags                = local.tags
+  tags                = var.tags
 }
 
 resource "azurerm_subnet" "main" {
-  name                 = "${local.prefix}-subnet"
+  name                 = "${var.prefix}-subnet"
   resource_group_name  = data.azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.20.1.0/24"]
@@ -16,10 +16,10 @@ resource "azurerm_subnet" "main" {
 # Only HTTP and HTTPS are reachable from the internet. No SSH: the VM is
 # operated through cloud-init and (if ever needed) the outbound-only path.
 resource "azurerm_network_security_group" "main" {
-  name                = "${local.prefix}-nsg"
-  location            = local.location
+  name                = "${var.prefix}-nsg"
+  location            = var.location
   resource_group_name = data.azurerm_resource_group.main.name
-  tags                = local.tags
+  tags                = var.tags
 
   security_rule {
     name                       = "allow-http"
@@ -48,21 +48,20 @@ resource "azurerm_network_security_group" "main" {
 
 # dns_label is provided by the caller, so the name is already globally unique.
 resource "azurerm_public_ip" "main" {
-  name                    = "${local.prefix}-pip"
-  location                = local.location
-  resource_group_name     = data.azurerm_resource_group.main.name
-  allocation_method       = "Static"
-  sku                     = "Standard"
-  domain_name_label       = var.dns_label
-  idle_timeout_in_minutes = 4
-  tags                    = local.tags
+  name                = "${var.prefix}-pip"
+  location            = var.location
+  resource_group_name = data.azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  domain_name_label   = var.dns_label
+  tags                = var.tags
 }
 
 resource "azurerm_network_interface" "main" {
-  name                = "${local.prefix}-nic"
-  location            = local.location
+  name                = "${var.prefix}-nic"
+  location            = var.location
   resource_group_name = data.azurerm_resource_group.main.name
-  tags                = local.tags
+  tags                = var.tags
 
   ip_configuration {
     name                          = "internal"

@@ -10,7 +10,8 @@
 #     -backend-config="use_azuread_auth=true"
 terraform {
   backend "azurerm" {
-    container_name = "tfstate"
-    key            = "demo-cours-docker-intro.tfstate"
+    container_name   = "tfstate"
+    key              = "demo-cours-docker-intro.tfstate"
+    use_azuread_auth = true
   }
 }
