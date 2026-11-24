@@ -48,6 +48,12 @@ d'architecture correspondantes sont dans [exploitation.md](exploitation.md).
 - **Métriques par conteneur.** Elles dépendent du moteur Docker de l'hôte
   (cgroups v2, snapshotters containerd) : à vérifier sur la VM après un
   changement de version de Docker.
+- **Le dashboard « Conteneurs » est vide.** cAdvisor remonte la machine et les
+  cgroups, mais aucune série par conteneur nommé (`container_cpu_usage_seconds_total{name!=""}`
+  est vide), en local comme sur la VM : il ne retrouve pas la couche inscriptible des
+  conteneurs avec le moteur Docker récent. Les métriques de l'hôte, de Traefik
+  et de l'application ne sont pas touchées. À reprendre avec une autre version
+  de cAdvisor ou un autre mode de stockage Docker.
 - **Pas de `CAP_SYSLOG` pour cAdvisor** (`cap_drop: ALL`). Sous Ubuntu, où
   `dmesg_restrict` vaut 1, la lecture de `/dev/kmsg` échoue et le watcher OOM est
   désactivé. Les métriques CPU / mémoire / réseau ne sont pas affectées.
