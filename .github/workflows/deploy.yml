@@ -40,8 +40,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The tag is the full SHA: it is the only value the VM can resolve later.
       - id: meta
-        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
@@ -50,6 +51,9 @@ jobs:
           tags: |
             ${{ env.APP_IMAGE }}:${{ github.sha }}
             ${{ env.APP_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -91,7 +95,7 @@ jobs:
 
       - name: apply
         env:
-          TF_VAR_budget_contact_emails: ${{ vars.BUDGET_CONTACT_EMAILS }}
+          TF_VAR_budget_contact_emails: ${{ vars.BUDGET_CONTACT_EMAILS || '[]' }}
         run: terraform apply -input=false -auto-approve -no-color
 
       - name: read outputs
@@ -121,15 +125,16 @@ jobs:
         id: env
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
           DOMAIN: ${{ needs.infra.outputs.fqdn }}
-          IMAGE_REF: ${{ env.APP_IMAGE }}:${{ needs.build.outputs.tag }}
+          IMAGE: ${{ env.APP_IMAGE }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
+          : "${GRAFANA_ADMIN_PASSWORD:?secret GRAFANA_ADMIN_PASSWORD is empty}"
+          : "${DOMAIN:?fqdn output is empty}"
           {
-            echo "APP_IMAGE=${IMAGE_REF%:*}"
-            echo "APP_IMAGE_TAG=${IMAGE_REF##*:}"
+            echo "APP_IMAGE=${IMAGE}"
+            echo "APP_IMAGE_TAG=${TAG}"
             echo "DOMAIN=${DOMAIN}"
-            echo "ACME_EMAIL=${ACME_EMAIL}"
             echo "GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}"
           } | base64 -w0 > /tmp/env.b64
           echo "b64=$(cat /tmp/env.b64)" >> "$GITHUB_OUTPUT"
@@ -140,16 +145,16 @@ jobs:
           FQDN: ${{ needs.infra.outputs.fqdn }}
           VM_NAME: ${{ needs.infra.outputs.vm_name }}
           RESOURCE_GROUP: ${{ needs.infra.outputs.resource_group }}
-          IMAGE_REF: ${{ env.APP_IMAGE }}:${{ needs.build.outputs.tag }}
+          IMAGE: ${{ env.APP_IMAGE }}:${{ needs.build.outputs.tag }}
+          SHA: ${{ github.sha }}
           ENV_B64: ${{ steps.env.outputs.b64 }}
-          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
         run: |
           az vm run-command invoke \
             --resource-group "$RESOURCE_GROUP" \
             --name "$VM_NAME" \
             --command-id RunShellScript \
             --scripts @scripts/vm-deploy.sh \
-            --parameters "image=$IMAGE_REF" "domain=$FQDN" "acme_email=$ACME_EMAIL" "env_b64=$ENV_B64" \
+            --parameters "image=$IMAGE" "sha=$SHA" "domain=$FQDN" "env_b64=$ENV_B64" \
             --query 'value[0].message' -o tsv
 
       - name: Smoke test
@@ -159,4 +164,4 @@ jobs:
           curl -fsS --retry 12 --retry-delay 10 --retry-all-errors "https://${FQDN}/health"
           echo
           curl -fsS -o /dev/null -w 'grafana %{http_code}\n' "https://${FQDN}/grafana/login"
-          curl -sI "http://${FQDN}/health" | head -1
+          curl -sI "https://${FQDN}/" | head -1

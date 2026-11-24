@@ -12,9 +12,10 @@ request sur `main`.
 | Application MVC (ASP.NET Core 8) | Page d'accueil, `/health`, `/metrics` | `app/` |
 | Traefik v3 | Reverse proxy, TLS Let's Encrypt, routage déclaratif par labels Docker | `stack/traefik/` |
 | socket-proxy | Proxy en lecture seule devant `/var/run/docker.sock` | `stack/docker-compose.yml` |
-| Prometheus | Collecte des métriques (4 cibles) | `stack/prometheus/` |
-| Grafana | 3 dashboards provisionnés, sous `/grafana/` | `stack/grafana/` |
+| Prometheus | Collecte des métriques (5 cibles) | `stack/prometheus/` |
+| Grafana | 4 dashboards provisionnés, sous `/grafana/` | `stack/grafana/` |
 | cAdvisor | Métriques CPU / mémoire / réseau par conteneur | `stack/docker-compose.yml` |
+| node_exporter | Métriques de l'hôte : CPU, mémoire, disques, charge | `stack/docker-compose.yml` |
 | Terraform | VNet, NSG, IP publique, VM, disque de données, budget | `infra/` |
 | GitHub Actions | Contrôles en PR, déploiement sur `main` | `.github/workflows/` |
 
@@ -69,13 +70,24 @@ gh variable set AZURE_TENANT_ID       --repo adam-benyekkou/demo-cours-docker-in
 gh variable set AZURE_SUBSCRIPTION_ID --repo adam-benyekkou/demo-cours-docker-intro --body "<subscriptionId>"
 gh variable set TF_STATE_RESOURCE_GROUP  --repo adam-benyekkou/demo-cours-docker-intro --body "rg-tfstate"
 gh variable set TF_STATE_STORAGE_ACCOUNT --repo adam-benyekkou/demo-cours-docker-intro --body "tfstate<xxxxxx>"
-gh variable set ACME_EMAIL            --repo adam-benyekkou/demo-cours-docker-intro --body "vous@example.com"
 gh variable set BUDGET_CONTACT_EMAILS --repo adam-benyekkou/demo-cours-docker-intro --body '["vous@example.com"]'
 gh secret   set GRAFANA_ADMIN_PASSWORD --repo adam-benyekkou/demo-cours-docker-intro
 ```
 
 Sans `BUDGET_CONTACT_EMAILS`, le budget n'est pas créé (Azure exige au moins un
 destinataire pour une alerte).
+
+Le package GHCR doit être public pour que la VM puisse le tirer sans
+authentification :
+
+```bash
+gh api -X PATCH /user/packages/container/demo-cours-docker-intro%2Fapp -f visibility=public
+```
+
+L'email du compte Let's Encrypt n'est pas passé par variable : il vit dans
+`stack/traefik/traefik.yml`. Traefik refuse de mélanger configuration statique
+fichier et options CLI, et le fichier gagne silencieusement. Sans email, Let's
+Encrypt émet quand même le certificat, sans notification d'expiration.
 
 ### 3. Premier déploiement
 
@@ -92,7 +104,6 @@ cd stack
 cp .env.example .env        # APP_IMAGE=demo-cours-app, APP_IMAGE_TAG=local
 docker compose --env-file .env -f docker-compose.yml -f docker-compose.local.yml up -d
 ```
-
 La surcharge locale utilise des volumes nommés, un certificat auto-signé et les
 ports `18080`/`18443` (les ports 80/443 de la machine hôte sont souvent occupés
 par d'autres conteneurs de cours).
@@ -143,6 +154,10 @@ az vm deallocate -g rg-demo-docker -n democours-vm   # hors session de cours
 - Traefik n'accède au socket Docker qu'à travers `tecnativa/docker-socket-proxy`
   en lecture seule (`POST=0`).
 - Prometheus, cAdvisor et le dashboard Traefik ne sont jamais publiés.
+- `/metrics` reste interne : le routeur public l'exclut, Prometheus l'appelle
+  directement sur le réseau Docker.
+- Le dashboard Traefik est désactivé (`api` absent de `traefik.yml`), il ne
+  reste que l'endpoint de santé interne.
 - Grafana : mot de passe injecté par la CI dans `stack/.env` (0600), jamais commité.
 - L'état Terraform vit dans un compte de stockage versionné, avec un rôle
   `Storage Blob Data Contributor` limité à ce compte.
