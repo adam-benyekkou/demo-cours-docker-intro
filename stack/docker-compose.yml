@@ -183,6 +183,8 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # No plugin downloads at startup: the root filesystem is read-only anyway.
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
       GF_METRICS_ENABLED: "false"
       GF_SERVER_ROOT_URL: https://${DOMAIN:?DOMAIN is required}/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"

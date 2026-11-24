@@ -81,8 +81,18 @@ jobs:
           curl -fsS "${base}/" | grep -q 'Bonjour depuis le conteneur'
           curl -sI "${base}/" | grep -qi '^strict-transport-security:'
 
+          # Grafana starts slower than the rest (migrations, plugin bootstrap):
+          # wait for its login page instead of testing it once.
+          wait_for() {
+            for _ in $(seq 1 18); do
+              [ "$(code "$1")" = "$2" ] && return 0
+              sleep 10
+            done
+            return 1
+          }
+
           test "$(code "${base}/metrics")" = 404 || { echo "public /metrics is not closed" >&2; exit 1; }
-          test "$(code "${base}/grafana/login")" = 200 || { echo "grafana login is not reachable" >&2; exit 1; }
+          wait_for "${base}/grafana/login" 200 || { echo "grafana login is not reachable" >&2; exit 1; }
           test "$(code "${base}/grafana/metrics")" != 200 || { echo "grafana metrics is public" >&2; exit 1; }
 
           echo "smoke test ok on ${base}"
