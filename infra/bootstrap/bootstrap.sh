@@ -2,35 +2,28 @@
 #
 # One-time (re-runnable) Azure bootstrap for the demo stack.
 #
-# Creates:
-#   - rg-tfstate + storage account (remote Terraform state) + tfstate container
+# Creates only what Terraform cannot create for itself:
+#   - rg-tfstate + storage account + tfstate container (remote state)
 #   - rg-demo-docker, the resource group that holds the whole stack
-#   - an Entra app registration + service principal with two federated
-#     credentials (GitHub OIDC, no client secret) and the two role assignments
-#   - the exact `gh variable`, `gh secret` and `gh api` commands to run next
 #
-# The consumption budget belongs to Terraform (infra/budget.tf), not here.
-# Nothing secret is created or echoed: authentication is OIDC only.
+# No Azure identity is created: the CI runs on a self-hosted runner installed on
+# the VM, so it never calls the Azure API. Terraform is applied by hand, with
+# your own `az login`.
+#
+# Requires: az (logged in), openssl.
 
 set -euo pipefail
 
 # --- driver variables -------------------------------------------------------
 SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-}"
 LOCATION="${LOCATION:-francecentral}"
-GH_REPO="${GH_REPO:-adam-benyekkou/demo-cours-docker-intro}"
-APP_NAME="${APP_NAME:-demo-docker-cours-gh}"
 
 TF_STATE_RG="rg-tfstate"
 APP_RG="rg-demo-docker"
 STATE_CONTAINER="tfstate"
-FED_PR_NAME="gh-pr"
-FED_ENV_NAME="gh-env-production"
-FED_ISSUER="https://token.actions.githubusercontent.com"
-FED_AUDIENCE="api://AzureADTokenExchange"
 
 # --- helpers ----------------------------------------------------------------
 log() { printf '==> %s\n' "$*"; }
-warn() { printf 'warning: %s\n' "$*" >&2; }
 die() {
   printf 'error: %s\n' "$*" >&2
   exit 1
@@ -44,12 +37,9 @@ require az
 require openssl
 
 [ -n "$SUBSCRIPTION_ID" ] || SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
-TENANT_ID="$(az account show --query tenantId -o tsv)"
-
 az account set --subscription "$SUBSCRIPTION_ID"
 
 log "subscription: $SUBSCRIPTION_ID"
-log "tenant:       $TENANT_ID"
 log "location:     $LOCATION"
 
 # --- 1. Terraform state storage ---------------------------------------------
@@ -116,122 +106,27 @@ fi
 log "resource group $APP_RG"
 az group create --name "$APP_RG" --location "$LOCATION" -o none
 
-APP_RG_ID="$(az group show -n "$APP_RG" --query id -o tsv)"
-SA_ID="$(az storage account show -g "$TF_STATE_RG" -n "$SA" --query id -o tsv)"
-
-# --- 3. Entra app registration + federation ---------------------------------
-APP_ID="$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv)"
-if [ -z "$APP_ID" ] || [ "$APP_ID" = "None" ]; then
-  log "app registration $APP_NAME"
-  APP_ID="$(az ad app create \
-    --display-name "$APP_NAME" \
-    --sign-in-audience AzureADMyOrg \
-    --query appId -o tsv)"
-else
-  log "app registration $APP_NAME (existing: $APP_ID)"
-fi
-
-SP_OBJECT_ID="$(az ad sp list --filter "appId eq '$APP_ID'" --query "[0].id" -o tsv)"
-if [ -z "$SP_OBJECT_ID" ] || [ "$SP_OBJECT_ID" = "None" ]; then
-  log "service principal"
-  az ad sp create --id "$APP_ID" -o none
-  SP_OBJECT_ID="$(az ad sp list --filter "appId eq '$APP_ID'" --query "[0].id" -o tsv)"
-fi
-if [ -z "$SP_OBJECT_ID" ] || [ "$SP_OBJECT_ID" = "None" ]; then
-  die "could not resolve the service principal object id"
-fi
-
-add_federated_credential() {
-  local name="$1"
-  local subject="$2"
-
-  if az ad app federated-credential list --id "$APP_ID" --query "[?name=='$name'].name" -o tsv | grep -qx "$name"; then
-    log "federated credential $name (existing)"
-    return 0
-  fi
-
-  log "federated credential $name"
-  az ad app federated-credential create --id "$APP_ID" --parameters "{
-    \"name\": \"$name\",
-    \"issuer\": \"$FED_ISSUER\",
-    \"subject\": \"$subject\",
-    \"audiences\": [\"$FED_AUDIENCE\"]
-  }" -o none
-}
-
-add_federated_credential "$FED_PR_NAME" "repo:${GH_REPO}:pull_request"
-# Deploy jobs declare `environment: production`, so their OIDC subject is
-# repo:<owner>/<repo>:environment:production, not ref:refs/heads/main.
-add_federated_credential "$FED_ENV_NAME" "repo:${GH_REPO}:environment:production"
-
-# --- 4. Role assignments ----------------------------------------------------
-assign_role() {
-  local role="$1"
-  local scope="$2"
-
-  if [ -n "$(az role assignment list --assignee-object-id "$SP_OBJECT_ID" --scope "$scope" \
-    --query "[?roleDefinitionName=='$role'].id" -o tsv)" ]; then
-    log "role $role (existing)"
-    return 0
-  fi
-
-  log "role $role"
-  az role assignment create \
-    --assignee-object-id "$SP_OBJECT_ID" \
-    --assignee-principal-type ServicePrincipal \
-    --role "$role" \
-    --scope "$scope" \
-    -o none
-}
-
-assign_role "Contributor" "$APP_RG_ID"
-assign_role "Storage Blob Data Contributor" "$SA_ID"
-
-# --- 5. GitHub configuration ------------------------------------------------
+# --- 3. What comes next -----------------------------------------------------
 cat <<EOF
 
-Bootstrap done. No secret was created here: GitHub authenticates with OIDC.
+Bootstrap done. No Azure identity and no secret were created.
 
-This block is the reference for the manual GitHub configuration; the README
-only points to it, so the two cannot drift apart.
+Terraform, from infra/ (the state lives in the account above):
 
-Repository variables:
+  terraform init \\
+    -backend-config="resource_group_name=$TF_STATE_RG" \\
+    -backend-config="storage_account_name=$SA"
+  terraform apply
 
-  gh variable set AZURE_CLIENT_ID --repo $GH_REPO --body "$APP_ID"
-  gh variable set AZURE_TENANT_ID --repo $GH_REPO --body "$TENANT_ID"
-  gh variable set AZURE_SUBSCRIPTION_ID --repo $GH_REPO --body "$SUBSCRIPTION_ID"
-  gh variable set TF_STATE_RESOURCE_GROUP --repo $GH_REPO --body "$TF_STATE_RG"
-  gh variable set TF_STATE_STORAGE_ACCOUNT --repo $GH_REPO --body "$SA"
+Then, once the public FQDN is known:
 
-Break-glass SSH public key installed on the VM (no SSH port is open):
+  gh variable set DOMAIN --repo <owner>/<repo> --body "<dns_label>.$LOCATION.cloudapp.azure.com"
+  gh secret set GRAFANA_ADMIN_PASSWORD --repo <owner>/<repo>
 
-  gh variable set ADMIN_SSH_PUBLIC_KEY --repo $GH_REPO --body "$(cat ~/.ssh/id_ed25519.pub)"
+And install the self-hosted runner on the VM, with a token that expires in one hour:
 
-Alert recipients as a Terraform list (this is what enables infra/budget.tf):
-
-  gh variable set BUDGET_CONTACT_EMAILS --repo $GH_REPO --body '["you@example.com"]'
-
-Make the GHCR package readable by the VM (no registry login on the host):
-
-  gh api -X PATCH /user/packages/container/demo-cours-docker-intro%2Fapp -f visibility=public
-
-Grafana admin password (the prompt keeps it out of the shell history):
-
-  gh secret set GRAFANA_ADMIN_PASSWORD --repo $GH_REPO
-
-Restrict deployments to main: only that branch may use the production
-environment and its OIDC token:
-
-  gh api -X PUT repos/$GH_REPO/environments/production \
-    -f 'deployment_branch_policy[protected_branches]=false' \
-    -f 'deployment_branch_policy[custom_branch_policies]=true'
-  gh api -X POST repos/$GH_REPO/environments/production/deployment-branch-policies -f name=main
-
-Terraform state for this stack lives in that storage account. CI passes the two
-values generated above; the container, the state key and Azure AD auth are
-already committed in infra/backend.tf:
-
-  terraform init -backend-config="resource_group_name=$TF_STATE_RG" \
-                 -backend-config="storage_account_name=$SA"
+  TOKEN=\$(gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token)
+  az vm run-command invoke -g $APP_RG -n <vm-name> --command-id RunShellScript \\
+    --scripts @scripts/runner-install.sh --parameters "<owner>/<repo>" "\$TOKEN"
 
 EOF

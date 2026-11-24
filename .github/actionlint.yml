@@ -1,0 +1,4 @@
+# Labels of the self-hosted runner installed by scripts/runner-install.sh.
+self-hosted-runner:
+  labels:
+    - democours

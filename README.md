@@ -2,7 +2,8 @@
 
 Une application MVC factice, conteneurisée et servie par Traefik, avec
 Prometheus, Grafana et cAdvisor pour l'observabilité. L'infrastructure est
-décrite en Terraform et déployée par GitHub Actions à chaque merge sur `main`.
+décrite en Terraform, et GitHub Actions déploie sur la VM depuis un runner
+auto-hébergé installé dessus, à chaque merge sur `main`.
 
 Suite du document : [exploitation](docs/exploitation.md) (choix d'architecture,
 coûts, dépannage) et [sécurité](docs/securite.md) (mesures en place, limites
@@ -20,6 +21,7 @@ connues).
 | cAdvisor | Métriques CPU / mémoire / réseau par conteneur | `stack/docker-compose.yml` |
 | node_exporter | Métriques de l'hôte : CPU, mémoire, disques, charge | `stack/docker-compose.yml` |
 | Terraform | VNet, NSG, IP publique, VM, disque de données, budget | `infra/` |
+| Runner auto-hébergé | Construit l'image et démarre la stack depuis la VM | `scripts/runner-install.sh` |
 | GitHub Actions | Contrôles en PR, déploiement sur `main` | `.github/workflows/` |
 
 ## Carte du dépôt
@@ -39,18 +41,18 @@ connues).
 │   ├── prometheus/              configuration de collecte
 │   └── grafana/                 provisioning et quatre dashboards
 ├── infra/                       infrastructure Azure (Terraform)
-│   ├── bootstrap/bootstrap.sh   à lancer une fois : état, app registration, rôles
+│   ├── bootstrap/bootstrap.sh   à lancer une fois : compte d'état et groupes de ressources
 │   ├── versions.tf, backend.tf  versions et état distant
 │   ├── variables.tf             toutes les variables et leurs valeurs par défaut
 │   ├── network.tf, vm.tf, disk.tf  VNet, NSG, IP publique, VM, disque /data
 │   ├── cloud-init.yml           préparation de l'hôte au premier démarrage
 │   └── budget.tf                alerte de consommation à 50 / 90 / 100 %
 ├── scripts/
-│   ├── vm-deploy.sh             exécuté sur la VM par la CI (run-command)
+│   ├── runner-install.sh        installe le runner auto-hébergé sur la VM
 │   └── check-yaml.py            parse tous les YAML, tags Compose compris
 ├── .github/
-│   ├── workflows/pr.yml         fmt, validate, plan, build, scans Trivy
-│   ├── workflows/deploy.yml     build + push, apply, déploiement, test de fumée
+│   ├── workflows/pr.yml         fmt, validate, build, scans Trivy
+│   ├── workflows/deploy.yml     build sur la VM, compose up, test de fumée
 │   └── dependabot.yml           versions des images, actions et provider
 ├── docs/
 │   ├── exploitation.md          choix d'architecture, coûts, dépannage
@@ -64,11 +66,12 @@ connues).
 flowchart LR
   client([Navigateur])
 
-  subgraph azure["Azure — francecentral"]
-    pip["IP publique statique<br/>dns_label.francecentral.cloudapp.azure.com"]
+  subgraph azure["Azure — spaincentral"]
+    pip["IP publique statique<br/>dns_label.spaincentral.cloudapp.azure.com"]
     nsg["NSG<br/>80 et 443 entrants<br/>aucun port d'administration"]
 
     subgraph vm["VM democours-vm — Ubuntu 24.04"]
+      runner["runner GitHub Actions<br/>build + compose up"]
       subgraph edge["réseau edge 10.89.0.0/24"]
         traefik["traefik v3<br/>TLS Let's Encrypt"]
         app["app .NET 10<br/>:8080"]
@@ -82,13 +85,12 @@ flowchart LR
       subgraph socket["réseau socket — interne"]
         proxy["socket-proxy<br/>POST=0"]
       end
-      data[("disque /data<br/>acme, prometheus, grafana")]
+      data[("disque /data<br/>runner, acme, prometheus, grafana")]
       sock(["docker.sock"])
     end
   end
 
-  github["GitHub Actions<br/>build, terraform, run-command"]
-  ghcr[("GHCR<br/>image taguée par SHA")]
+  github["GitHub Actions<br/>PR checks, workflow Deploy"]
 
   client -->|"80 / 443"| pip --> nsg --> traefik
   traefik -->|"/"| app
@@ -104,45 +106,45 @@ flowchart LR
   proxy --> sock
   traefik -->|"API Docker"| proxy
 
-  github -->|OIDC| azure
-  github -->|push| ghcr
-  ghcr -.->|pull| vm
-  github -->|"run-command"| vm
+  runner -.->|"docker build, compose up"| edge
+  github -->|"push main<br/>(HTTPS sortant)"| runner
 ```
 
 Seuls 80 et 443 sont joignables depuis Internet, et c'est la seule brèche
-ouverte : le reste est détaillé dans [la page sécurité](docs/securite.md).
+ouverte (le runner sort vers github.com, rien n'entre par lui) : le reste est détaillé dans [la page sécurité](docs/securite.md).
 
 ## Flux de déploiement
 
 ```mermaid
 flowchart LR
-  PR[Pull request] --> Checks[fmt / validate / plan / build / scan]
+  PR[Pull request] --> Checks["fmt / validate / build / scan<br/>(runner GitHub-hosted)"]
   Checks --> Merge[Merge sur main]
-  Merge --> Build[Build et push image GHCR]
-  Build --> TF[terraform apply]
-  TF --> Deploy[az vm run-command]
-  Deploy --> VM[VM : compose up]
-  VM --> Smoke[curl https://fqdn/health]
+  Merge --> Runner["workflow Deploy<br/>(runner auto-hébergé sur la VM)"]
+  Runner --> Build["docker build app/"]
+  Build --> Up["compose up -d"]
+  Up --> Smoke["curl https://fqdn/health"]
 ```
 
 Deux workflows :
 
-- `pr.yml` : `terraform fmt -check`, `validate`, `plan` commenté dans la PR,
-  build Docker sans push, validation du compose et des YAML, scan Trivy de
-  l'image et des fichiers d'infrastructure.
-- `deploy.yml` : build et push de l'image taguée `${GITHUB_SHA}`, `terraform
-  apply`, réécriture du `.env` de la VM (paramètre protégé), `docker compose up
-  -d`, test de fumée HTTPS qui vérifie aussi que `/metrics` reste fermé.
+- `pr.yml` : `terraform fmt -check`, `validate`, build Docker sans push,
+  validation du compose et des YAML, scan Trivy de l'image et des fichiers
+  d'infrastructure. Tout tourne sur `ubuntu-latest`.
+- `deploy.yml` : sur `push` vers `main` uniquement, sur le runner de la VM :
+  écriture du `.env`, `docker build`, `compose up -d`, test de fumée HTTPS qui
+  vérifie aussi que `/metrics` reste fermé.
 
-Aucune clé SSH n'est exposée et aucun port d'administration n'est ouvert : le
-déploiement passe par `az vm run-command`. L'authentification Azure utilise OIDC
-(identité fédérée GitHub), sans secret de client.
+Aucun identifiant Azure n'est stocké dans GitHub : le déploiement ne parle pas à
+l'API Azure, il s'exécute sur la machine qui l'héberge. Terraform est appliqué à
+la main, avec ton propre `az login`. Pourquoi ce choix : voir
+[exploitation](docs/exploitation.md).
 
 ## Prérequis
 
 - Une souscription Azure et la CLI `az` connectée (`az login`).
 - `terraform >= 1.9`, `docker` avec le plugin compose, `gh` authentifié.
+- Une clé SSH publique : Azure exige une méthode d'authentification sur la VM,
+  même sans port 22 ouvert. Elle ne sert qu'en secours.
 - Un dépôt GitHub public (les workflows lisent `vars.*` ; aucun secret en clair).
 
 ## Mise en route
@@ -153,39 +155,53 @@ déploiement passe par `az vm run-command`. L'authentification Azure utilise OID
 ./infra/bootstrap/bootstrap.sh
 ```
 
-Le script crée le stockage d'état Terraform, le groupe de ressources, l'app
-registration avec ses deux identifiants fédérés (`pull_request` et
-`environment:production`), les rôles minimaux, puis affiche les commandes
-`gh variable`, `gh secret` et `gh api` à exécuter. **Ce bloc affiché est la
-référence** ; il est rejouable sans effet de bord.
+Le script crée le groupe de ressources d'état, le compte de stockage versionné
+et son conteneur, puis `rg-demo-docker`. Il ne crée **aucune identité Azure**.
+Son affichage final donne les commandes suivantes ; il est rejouable sans effet
+de bord.
 
-Trois points qu'il ne peut pas décider à ta place :
-
-- `GRAFANA_ADMIN_PASSWORD` est le seul secret GitHub (`gh secret set` demande la
-  valeur au prompt, hors historique du shell).
-- `ADMIN_SSH_PUBLIC_KEY` est une clé de secours : aucun port SSH n'est ouvert,
-  le déploiement passe par `run-command`. Seule la clé publique est stockée.
-- Sans `BUDGET_CONTACT_EMAILS`, le budget n'est pas créé : Azure exige au moins
-  un destinataire pour une alerte.
-
-### 2. Premier déploiement
-
-Merger une pull request sur `main`. Le workflow `Deploy` provisionne
-l'infrastructure, publie l'image et démarre la stack sur la VM. L'URL est
-`https://<dns_label>.<region>.cloudapp.azure.com`.
-
-Attention au premier `apply` après adoption de `ADMIN_SSH_PUBLIC_KEY` :
-`admin_ssh_key` est `ForceNew` dans azurerm 5.x, donc **la VM est détruite et
-recréée**. Le disque `/data` (état Traefik, Prometheus, Grafana, certificats) et
-l'IP publique sont des ressources séparées : ils survivent, le FQDN ne change
-pas, mais le site est indisponible le temps d'un redéploiement. Vérifier avant
-de merger :
+### 2. Terraform (à la main)
 
 ```bash
-cd infra && terraform plan | grep -E 'must be replaced|admin_ssh_key'
+cd infra
+cp terraform.tfvars.example terraform.tfvars   # renseigner admin_ssh_public_key
+terraform init \
+  -backend-config="resource_group_name=rg-tfstate" \
+  -backend-config="storage_account_name=<tfstate-xxxxxx>"
+terraform apply
 ```
 
-Ensuite, les déploiements suivants ne touchent plus à la VM.
+Ton compte a besoin de `Storage Blob Data Contributor` sur le compte d'état. Lire
+le plan avant d'appliquer. La région et la taille de VM par défaut sont celles
+qui passent sur un abonnement Azure for Students (voir
+[exploitation](docs/exploitation.md)).
+
+### 3. Variable et secret GitHub
+
+```bash
+gh variable set DOMAIN --body "$(terraform -chdir=infra output -raw fqdn)"
+gh secret   set GRAFANA_ADMIN_PASSWORD
+```
+
+`GRAFANA_ADMIN_PASSWORD` est le seul secret GitHub (`gh secret set` demande la
+valeur au prompt, hors historique du shell).
+
+### 4. Runner auto-hébergé sur la VM
+
+```bash
+TOKEN=$(gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token)
+az vm run-command invoke -g rg-demo-docker -n democours-vm \
+  --command-id RunShellScript --scripts @scripts/runner-install.sh \
+  --parameters "<owner>/<repo>" "$TOKEN"
+gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | "\(.name) \(.status)"'
+```
+
+Le runner s'installe sous `/data/actions-runner` avec le label `democours`. Le
+token expire en une heure.
+
+### 5. Premier déploiement
+
+Un push sur `main` déclenche `Deploy` sur le runner. L'URL est `https://<DOMAIN>`.
 
 ## Test local, sans Azure
 
