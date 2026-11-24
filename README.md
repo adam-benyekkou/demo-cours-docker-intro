@@ -162,6 +162,21 @@ az vm deallocate -g rg-demo-docker -n democours-vm   # hors session de cours
 - L'état Terraform vit dans un compte de stockage versionné, avec un rôle
   `Storage Blob Data Contributor` limité à ce compte.
 
+## Limites connues
+
+- Le `.env` de la VM est transmis par `az vm run-command` en base64 : masqué dans
+  les logs GitHub, mais visible dans l'historique de l'extension côté Azure et
+  sur la VM. Pour un usage réel, passer par Key Vault et l'identité managée de la VM.
+- Un PR de même dépôt obtient le jeton OIDC avec `Contributor` sur le groupe de
+  ressources : il peut modifier le workflow. Une app registration séparée en
+  lecture seule pour les PR serait nécessaire en production.
+- `Standard_B2s` (4 Go) héberge sept conteneurs : confortable pour la démo,
+  juste si Grafana et l'application travaillent en même temps.
+- La première émission Let's Encrypt utilise la production ; en cas d'échecs
+  répétés, basculer l'ACME sur le répertoire staging.
+- Les paramètres du backend sont répétés dans `backend.tf` et dans les deux
+  workflows, faute d'un `backend.hcl` partagé.
+
 ## Dépannage
 
 | Symptôme | Piste |
