@@ -203,6 +203,58 @@ token expire en une heure.
 
 Un push sur `main` déclenche `Deploy` sur le runner. L'URL est `https://<DOMAIN>`.
 
+## Explorer les services
+
+Une fois `Deploy` vert, tout passe par `https://<DOMAIN>` (la valeur de la
+variable GitHub `DOMAIN`, soit `terraform -chdir=infra output -raw fqdn`). Le
+certificat est un vrai Let's Encrypt ; il est émis à la première requête
+après le démarrage, soit quelques secondes. Un avertissement « certificat
+auto-signé » dans les premières minutes est le certificat par défaut de Traefik :
+recharger la page.
+
+| URL | Ce qu'on voit | Attendu |
+|---|---|---|
+| `/` | Page « Bonjour depuis le conteneur » : nom du conteneur, version = SHA du commit, uptime, adresse client vue par l'appli | 200 |
+| `/health` | JSON `{"status":"Healthy", ...}` | 200 |
+| `/metrics` | Métriques Prometheus de l'application | **404** : volontairement fermé au public |
+| `/grafana/` | Connexion Grafana : utilisateur `admin`, mot de passe = celui donné à `gh secret set GRAFANA_ADMIN_PASSWORD` (GitHub ne le relit jamais) | 200 |
+| `/grafana/metrics` | Métriques internes de Grafana | pas 200 : désactivées |
+
+Les quatre dashboards sont dans le dossier « Démo Docker » de Grafana :
+
+| Dashboard | Source | À regarder |
+|---|---|---|
+| Démo — Application (HTTP) | `/metrics` de l'appli | requêtes par code, latence p95 : recharger `/` plusieurs fois et voir la courbe monter |
+| Démo — Traefik | Traefik (`:8082`, interne) | trafic par routeur (`app`, `grafana`) |
+| Démo — Hôte (node_exporter) | node_exporter | CPU, mémoire, disques, charge de la VM |
+| Démo — Conteneurs (cAdvisor) | cAdvisor | **vide pour l'instant**, voir [sécurité](docs/securite.md) (limites connues) |
+
+Pour générer du trafic visible dans les dashboards :
+
+```bash
+for i in $(seq 1 200); do curl -s -o /dev/null https://<DOMAIN>/; done
+```
+
+Prometheus, cAdvisor, node_exporter et le socket-proxy ne sont **pas publiés** :
+aucun port 9090, aucune URL. Pour interroger Prometheus, passer par la VM :
+
+```bash
+az vm run-command invoke -g rg-demo-docker -n democours-vm --command-id RunShellScript \
+  --scripts "cd /data/actions-runner/_work/*/*/stack && docker compose --env-file .env -f docker-compose.yml exec -T prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets" \
+  --query 'value[0].message' -o tsv
+```
+
+Les cinq cibles (`app`, `traefik`, `cadvisor`, `node`, `prometheus`) doivent être
+`up`. Dans Grafana, la même information est dans Explorer avec la requête `up`.
+
+Vérifier d'un coup depuis un terminal :
+
+```bash
+B=https://<DOMAIN>
+for p in / /health /metrics /grafana/login; do printf '%s %s\n' $p "$(curl -s -o /dev/null -w '%{http_code}' $B$p)"; done
+# attendu : 200, 200, 404, 200
+```
+
 ## Test local, sans Azure
 
 ```bash
