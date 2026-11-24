@@ -102,8 +102,8 @@ flowchart LR
   prometheus -.->|scrape| node
   prometheus --> data
   grafana --> data
-  cadvisor --> sock
   proxy --> sock
+  cadvisor -->|"API Docker"| proxy
   traefik -->|"API Docker"| proxy
 
   runner -.->|"docker build, compose up"| edge
@@ -227,7 +227,7 @@ Les quatre dashboards sont dans le dossier « Démo Docker » de Grafana :
 | Démo — Application (HTTP) | `/metrics` de l'appli | requêtes par code, latence p95 : recharger `/` plusieurs fois et voir la courbe monter |
 | Démo — Traefik | Traefik (`:8082`, interne) | trafic par routeur (`app`, `grafana`) |
 | Démo — Hôte (node_exporter) | node_exporter | CPU, mémoire, disques, charge de la VM |
-| Démo — Conteneurs (cAdvisor) | cAdvisor | **vide pour l'instant**, voir [sécurité](docs/securite.md) (limites connues) |
+| Démo — Conteneurs (cAdvisor) | cAdvisor | CPU, mémoire, réseau par conteneur (`app`, `traefik`, `grafana`…) ; vide en local si Docker utilise le snapshotter containerd, voir [sécurité](docs/securite.md) |
 
 Pour générer du trafic visible dans les dashboards :
 

@@ -69,6 +69,12 @@ write_files:
       #!/bin/bash
       set -euo pipefail
 
+      # Classic overlay2 storage, not the containerd snapshotter that Docker 29
+      # enables on fresh installs: cAdvisor cannot name containers on the latter.
+      # Written before the install so the first daemon start already uses it.
+      install -d /etc/docker
+      printf '{\n  "features": { "containerd-snapshotter": false }\n}\n' > /etc/docker/daemon.json
+
       # Official Docker apt repository, pinned to the Ubuntu codename.
       install -m 0755 -d /etc/apt/keyrings
       if [ ! -f /etc/apt/keyrings/docker.asc ]; then
