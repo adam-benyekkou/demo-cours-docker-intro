@@ -1,3 +1,7 @@
+# dashboards.yml — déclare le fournisseur de dashboards Grafana basé sur des fichiers.
+#
+# Grafana charge les JSON du chemin indiqué et les relit toutes les 30 secondes ; ce fichier ne contient aucun dashboard.
+# On y modifie le dossier ou le fournisseur, pas les dashboards eux-mêmes.
 apiVersion: 1
 
 providers:

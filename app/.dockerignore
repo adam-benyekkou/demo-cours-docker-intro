@@ -1,3 +1,7 @@
+# .dockerignore — exclut du contexte de build les fichiers inutiles à l'image.
+#
+# Le Dockerfile copie tout le dossier app/ : cette liste évite d'y envoyer
+# bin/, obj/, .git/ et les fichiers d'IDE. Elle ne filtre rien à l'exécution.
 bin/
 obj/
 .git/

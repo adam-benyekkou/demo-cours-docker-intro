@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Installs (or reinstalls) the GitHub Actions self-hosted runner on this VM.
-# One shot, run as root through `az vm run-command`:
+# runner-install.sh — installe le runner GitHub Actions self-hosted sur la VM.
+#
+# Lancé une fois, en root, via `az vm run-command` : c'est lui qui enregistre le
+# runner que deploy.yml utilise ensuite. On y revient quand la version du runner
+# ou ses prérequis changent. Il ne touche ni au dépôt ni aux workflows.
 #
 #   runner-install.sh <owner/repo> <registration-token> [labels]
 #
-# `az vm run-command invoke` passes parameter values positionally and drops
-# their names, so the arguments are positional on purpose.
-#
-# The token is a registration token, valid for one hour, obtained with:
+# `az vm run-command invoke` passe les valeurs des paramètres en positionnel et
+# perd leurs noms : les arguments sont donc positionnels à dessein.
+# Le token est un token d'enregistrement, valable une heure, obtenu avec :
 #   gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token
 set -euo pipefail
 
@@ -37,14 +39,15 @@ if [ ! -f "$RUNNER_DIR/run.sh" ]; then
     chown -R "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
 fi
 
-# The runner scripts insist on being started from the runner root.
+# Les scripts du runner exigent d'être lancés depuis sa racine.
 cd "$RUNNER_DIR"
 
-# libicu and friends: the runner is a .NET build and needs them.
+# libicu et compagnie : le runner est un binaire .NET et en a besoin.
 ./bin/installdependencies.sh >/dev/null
 
-# config.sh refuses an already configured runner; to re-register, remove it first
-# (`./config.sh remove --token <removal-token>`) or delete /data/actions-runner/.runner.
+# config.sh refuse un runner déjà configuré ; pour le réenregistrer, le supprimer
+# d'abord (`./config.sh remove --token <removal-token>`) ou effacer
+# /data/actions-runner/.runner.
 if [ ! -f .runner ]; then
     sudo -u "$RUNNER_USER" ./config.sh \
         --unattended \

@@ -1,3 +1,7 @@
+# variables.tf — déclare les variables d'entrée de la stack et leurs défauts.
+#
+# À modifier quand un nom, une taille ou une valeur par défaut change. Les
+# validations rejettent une valeur mal formée avant tout appel à Azure.
 variable "prefix" {
   description = "Prefix used for every resource name created by this stack."
   type        = string

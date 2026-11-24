@@ -1,3 +1,7 @@
+<!-- DemoApp.csproj — décrit l'application web .NET 10 et ses dépendances. -->
+<!-- -->
+<!-- Cible net10.0, nullabilité et usings implicites, culture invariante. -->
+<!-- Un seul paquet : prometheus-net.AspNetCore ; ajouter ici une dépendance. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>

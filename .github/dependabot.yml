@@ -1,3 +1,7 @@
+# dependabot.yml — planifie les mises à jour de dépendances, un écosystème à la fois.
+#
+# Lu par Dependabot une fois par semaine pour chaque répertoire listé. On y ajoute
+# un écosystème ou un répertoire ; il n'ouvre que des pull requests, sans merger.
 version: 2
 
 updates:

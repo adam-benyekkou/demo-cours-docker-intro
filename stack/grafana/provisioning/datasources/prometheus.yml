@@ -1,3 +1,7 @@
+# prometheus.yml — déclare Prometheus comme source de données Grafana.
+#
+# Provisionné au démarrage de Grafana : c'est ici qu'on change l'URL ou l'UID de la source.
+# La source n'est pas modifiable depuis l'interface (editable: false).
 apiVersion: 1
 
 datasources:

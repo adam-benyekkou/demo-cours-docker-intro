@@ -1,3 +1,9 @@
+# .editorconfig — fixe l'encodage, les fins de ligne et l'indentation du dépôt.
+#
+# Lu par les éditeurs et par les outils qui respectent le format : c'est ici
+# qu'on aligne les conventions d'un langage à l'autre (4 espaces en C# et en
+# shell, 2 ailleurs).
+
 root = true
 
 [*]

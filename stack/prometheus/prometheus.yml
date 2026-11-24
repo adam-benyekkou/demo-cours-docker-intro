@@ -1,3 +1,7 @@
+# prometheus.yml — configure la collecte Prometheus de la démo.
+#
+# Lu par le conteneur Prometheus au démarrage : on y ajoute une cible quand un service expose des métriques.
+# La rétention et le chemin de stockage sont fixés par les flags du service, pas ici.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s

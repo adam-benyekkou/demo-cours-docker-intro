@@ -1,9 +1,10 @@
 #cloud-config
-# Rendered by terraform templatefile(): dollar-brace expressions are Terraform
-# variables, bare $NAME are shell variables evaluated on the VM at first boot.
+# cloud-init.yml — prépare l'hôte au premier démarrage : paquets, disque, Docker.
 #
-# This file must never write the stack environment file nor start the compose
-# stack: the GitHub Actions runner owns both. It only prepares the host.
+# Rendu par terraform templatefile() depuis vm.tf : les expressions dollar-accolade
+# sont des variables Terraform, les $NAME nus des variables shell évaluées sur la VM.
+# Ne doit jamais écrire l'environnement de la stack ni lancer compose : le runner
+# GitHub Actions s'en charge. Ce fichier ne fait que préparer l'hôte.
 
 package_update: true
 package_upgrade: false
@@ -25,7 +26,7 @@ write_files:
       DEVICE="${data_device}"
       MOUNT="${data_mount}"
 
-      # The data disk is attached at LUN 0; wait for the device to appear.
+      # Le disque de données est attaché au LUN 0 ; on attend que le device apparaisse.
       for _ in $(seq 1 30); do
         if [ -b "$DEVICE" ]; then
           break
@@ -38,7 +39,7 @@ write_files:
         exit 1
       fi
 
-      # Never reformat an already formatted disk.
+      # Ne jamais reformater un disque déjà formaté.
       if ! blkid "$DEVICE" >/dev/null 2>&1; then
         mkfs.ext4 -F -L data "$DEVICE"
       fi
@@ -54,7 +55,7 @@ write_files:
         mount "$MOUNT"
       fi
 
-      # Bind-mount targets used by the compose stack.
+      # Répertoires de montage utilisés par la stack compose.
       install -d -o root -g root -m 0755 "$MOUNT/traefik"
       if [ ! -f "$MOUNT/traefik/acme.json" ]; then
         install -o root -g root -m 0600 /dev/null "$MOUNT/traefik/acme.json"
@@ -69,20 +70,21 @@ write_files:
       #!/bin/bash
       set -euo pipefail
 
-      # Classic overlay2 storage, not the containerd snapshotter that Docker 29
-      # enables on fresh installs: cAdvisor cannot name containers on the latter.
-      # Written before the install so the first daemon start already uses it.
+      # Stockage overlay2 classique, et non le containerd snapshotter que Docker 29
+      # active sur les installations neuves : cAdvisor ne sait pas nommer les
+      # conteneurs avec ce dernier. Écrit avant l'installation pour que le premier
+      # démarrage du démon l'utilise déjà.
       install -d /etc/docker
       printf '{\n  "features": { "containerd-snapshotter": false }\n}\n' > /etc/docker/daemon.json
 
-      # Official Docker apt repository, pinned to the Ubuntu codename.
+      # Dépôt apt officiel de Docker, épinglé sur le nom de code Ubuntu.
       install -m 0755 -d /etc/apt/keyrings
       if [ ! -f /etc/apt/keyrings/docker.asc ]; then
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
       fi
       chmod a+r /etc/apt/keyrings/docker.asc
 
-      # The repository key is pinned by fingerprint, not just fetched over TLS.
+      # La clé du dépôt est épinglée par empreinte, pas seulement récupérée en TLS.
       DOCKER_KEY_FPR="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
       FOUND_FPR="$(gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc 2>/dev/null \
         | awk -F: '/^fpr:/ { print $10; exit }')"
@@ -106,9 +108,10 @@ runcmd:
   - [bash, /usr/local/sbin/setup-data-disk.sh]
   - [bash, /usr/local/sbin/setup-docker.sh]
   - |
-    # Account the self-hosted GitHub Actions runner will run as. It drives
-    # Docker, so it is root-equivalent whatever we do; it has no login shell.
-    # Its work directory lives on the data disk: dotnet builds are large.
+    # Compte sous lequel tournera le runner GitHub Actions auto-hébergé. Il pilote
+    # Docker, donc il est équivalent à root quoi qu'on fasse ; il n'a pas de shell
+    # de connexion. Son répertoire de travail est sur le disque de données : les
+    # builds dotnet sont volumineux.
     id -u ghrunner >/dev/null 2>&1 \
       || useradd --create-home --home-dir /data/actions-runner --shell /usr/sbin/nologin ghrunner
     usermod -aG docker ghrunner

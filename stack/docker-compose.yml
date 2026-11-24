@@ -1,9 +1,12 @@
+# docker-compose.yml — décrit les six services de la démo et leur routage.
+#
+# Fichier de référence du déploiement : c'est ici qu'on ajoute ou modifie un service.
+# Traefik y tient toute sa configuration, sans fichier externe : entrypoints et ACME en flags.
+# La stack tourne sur le réseau par défaut de Compose, sans réseau déclaré.
 name: demo-stack
 
-# Six services, un réseau par défaut, aucune configuration Traefik hors de ce
-# fichier : les entrypoints et ACME sont passés en flags. Le détail des choix et
-# ce qu'on accepte de perdre (en-têtes de sécurité, socket-proxy, utilisateur
-# non-root) est dans le README.
+# Détail des choix, et de ce qu'on accepte de perdre (en-têtes de sécurité,
+# socket-proxy, utilisateur non-root) : voir le README.
 
 services:
   traefik:

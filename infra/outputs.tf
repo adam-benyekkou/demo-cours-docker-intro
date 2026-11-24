@@ -1,3 +1,7 @@
+# outputs.tf — valeurs exposées après apply : FQDN, IP publique, VM et groupe.
+#
+# C'est ce que la CI et les scripts lisent avec `terraform output`. L'adresse
+# publique sert de point d'entrée pour la configuration des déploiements.
 output "fqdn" {
   description = "Public FQDN of the demo host: <dns_label>.<location>.cloudapp.azure.com."
   value       = azurerm_public_ip.main.fqdn

@@ -1,25 +1,28 @@
-# Copy to terraform.tfvars and adjust. The comments say which values differ from
-# the module defaults in infra/variables.tf; everything else mirrors them.
+# terraform.tfvars.example — modèle de valeurs à copier en terraform.tfvars.
+#
+# À copier en terraform.tfvars puis à ajuster : les commentaires signalent les
+# valeurs qui diffèrent des défauts d'infra/variables.tf, tout le reste les
+# recopie. Terraform ne lit que terraform.tfvars, jamais ce fichier.
 
 prefix              = "democours"
 location            = "spaincentral"
 resource_group_name = "rg-demo-docker"
 admin_username      = "azureuser"
 
-# Required: OpenSSH public key for the administrator account (break-glass only).
+# Obligatoire : clé publique OpenSSH du compte administrateur (secours uniquement).
 admin_ssh_public_key = "ssh-ed25519 AAAA... you@example.com"
 
-# Optional, defaults to "demo-cours-docker" (variables.tf). Produces
-# <dns_label>.<location>.cloudapp.azure.com and must be unique in the region:
-# 3-63 lowercase alphanumeric characters or hyphens. The value below is only an
-# example, which is why it differs from the default.
+# Optionnel, par défaut "demo-cours-docker" (variables.tf). Produit
+# <dns_label>.<location>.cloudapp.azure.com et doit être unique dans la région :
+# 3-63 caractères alphanumériques minuscules ou tirets. La valeur ci-dessous n'est
+# qu'un exemple, c'est pourquoi elle diffère du défaut.
 dns_label = "demo-cours-docker-adam"
 
 vm_size            = "Standard_D2s_v4"
 data_disk_size_gb  = 32
 budget_amount      = 20
 
-# Azure requires at least one contact when the budget is applied.
+# Azure exige au moins un contact quand le budget est appliqué.
 # budget_contact_emails = ["you@example.com"]
 budget_contact_emails = []
 

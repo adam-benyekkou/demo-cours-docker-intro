@@ -1,3 +1,7 @@
+// HomeController.cs — sert la page d'accueil et la page d'erreur.
+//
+// Prépare les données de vue : adresse du client et en-tête X-Forwarded-For.
+// Modifier ici pour changer ce que les vues reçoivent, pas leur rendu.
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
