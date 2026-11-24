@@ -14,12 +14,9 @@ WORKDIR /app
 
 COPY --from=build /out ./
 
-# The aspnet image already defines APP_UID=1654, the non-root user "app",
-# ASPNETCORE_HTTP_PORTS=8080 and DOTNET_RUNNING_IN_CONTAINER=true.
+# The aspnet image already defines APP_UID=1654, ASPNETCORE_HTTP_PORTS=8080
+# and DOTNET_RUNNING_IN_CONTAINER=true.
 USER $APP_UID
 EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
 
 ENTRYPOINT ["dotnet", "DemoApp.dll"]

@@ -1,82 +1,43 @@
 name: demo-stack
 
-x-logging: &default-logging
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
-
-# Moindre privilège pour tous les services. Ceux qui écrivent à l'exécution
-# reçoivent en plus read_only + tmpfs, voir chaque service.
-x-hardening: &hardening
-  security_opt:
-    - no-new-privileges:true
-  cap_drop:
-    - ALL
+# Six services, un réseau par défaut, aucune configuration Traefik hors de ce
+# fichier : les entrypoints et ACME sont passés en flags. Le détail des choix et
+# ce qu'on accepte de perdre (en-têtes de sécurité, socket-proxy, utilisateur
+# non-root) est dans le README.
 
 services:
-  # Proxy en lecture seule devant le socket Docker : Traefik découvre les
-  # conteneurs sans jamais pouvoir en créer ou en supprimer. Il vit sur son
-  # propre réseau interne, hors de portée des conteneurs applicatifs.
-  socket-proxy:
-    image: tecnativa/docker-socket-proxy:3.4
-    restart: unless-stopped
-    environment:
-      CONTAINERS: "1"
-      EVENTS: "1"
-      INFO: "1"
-      NETWORKS: "1"
-      PING: "1"
-      VERSION: "1"
-      POST: "0"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - socket
-    <<: *hardening
-    logging: *default-logging
-
   traefik:
     image: traefik:v3.8.0
     restart: unless-stopped
-    depends_on:
-      - socket-proxy
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      # HTTP -> HTTPS sur l'entrypoint. Le résolveur ACME reste en TLS-ALPN-01
+      # pour ne pas dépendre du port 80.
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls.certresolver=le
+      # Métriques Prometheus sur un entrypoint interne, jamais publié.
+      - --entrypoints.metrics.address=:8082
+      - --metrics.prometheus.entryPoint=metrics
+      - --metrics.prometheus.addEntryPointsLabels=true
+      - --metrics.prometheus.addServicesLabels=true
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.storage=/acme/acme.json
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /data/traefik:/acme
-    environment:
-      TZ: Europe/Paris
-    healthcheck:
-      test: ["CMD", "traefik", "healthcheck", "--ping"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    networks:
-      - edge
-      - monitoring
-      - socket
-    <<: *hardening
-    cap_add:
-      - NET_BIND_SERVICE
-    read_only: true
-    tmpfs:
-      - /tmp
-    logging: *default-logging
 
   app:
-    image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
+    build: ../app
     restart: unless-stopped
     environment:
-      APP_VERSION: ${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
-      # Racine en lecture seule : .NET range ses clés de protection sous $HOME.
-      HOME: /tmp
-      # Prometheus interroge http://app:8080 : son en-tête Host doit passer.
-      AllowedHosts: "${DOMAIN:?DOMAIN is required};app"
+      APP_VERSION: ${APP_VERSION:-dev}
     expose:
       - "8080"
     labels:
@@ -85,25 +46,11 @@ services:
       - traefik.http.routers.app.rule=Host(`${DOMAIN:?DOMAIN is required}`) && !PathPrefix(`/metrics`)
       - traefik.http.routers.app.entrypoints=websecure
       - traefik.http.routers.app.priority=10
-      - traefik.http.routers.app.middlewares=security-headers@file
       - traefik.http.services.app.loadbalancer.server.port=8080
-    networks:
-      - edge
-      - monitoring
-    <<: *hardening
-    read_only: true
-    tmpfs:
-      - /tmp
-    logging: *default-logging
 
   prometheus:
     image: prom/prometheus:v3.16.0
     restart: unless-stopped
-    # Start order only, not a health wait: Prometheus retries a target that is
-    # still down, so this only gives the scrapers a head start.
-    depends_on:
-      - cadvisor
-      - traefik
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -111,19 +58,6 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - /data/prometheus:/prometheus
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    networks:
-      - monitoring
-    <<: *hardening
-    read_only: true
-    tmpfs:
-      - /tmp
-    logging: *default-logging
 
   node-exporter:
     image: prom/node-exporter:v1.13.1
@@ -136,23 +70,16 @@ services:
       - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($|/)
     volumes:
       - /:/host:ro,rslave
-    networks:
-      - monitoring
-    <<: *hardening
-    read_only: true
-    logging: *default-logging
 
-  # cAdvisor lit les conteneurs à travers le socket-proxy : il ne monte aucun
-  # socket. Version épinglée en v0.52.0 exprès : dès la v0.53.0 sa fabrique
-  # Docker exige aussi le socket gRPC de containerd, qu'un proxy HTTP ne peut
-  # pas fournir. Les noms de conteneurs demandent le stockage Docker `overlay2`
-  # (cloud-init écrit /etc/docker/daemon.json) : avec le snapshotter containerd,
-  # cAdvisor ne retrouve pas la couche inscriptible et ne remonte rien.
+  # cAdvisor lit le socket Docker et le socket containerd. Docker 29 utilise par
+  # défaut le snapshotter containerd : sans le second socket, cAdvisor enregistre
+  # bien la fabrique Docker mais ne retrouve aucune couche inscriptible et le
+  # dashboard « Conteneurs » reste vide. Les deux sockets sont montés en lecture
+  # seule.
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.0
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
     restart: unless-stopped
     command:
-      - --docker=tcp://socket-proxy:2375
       - --docker_only=true
       - --housekeeping_interval=15s
     volumes:
@@ -160,42 +87,23 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
     devices:
       - /dev/kmsg
-    networks:
-      - monitoring
-      - socket
-    <<: *hardening
-    read_only: true
-    tmpfs:
-      - /tmp
-    logging: *default-logging
 
   grafana:
     image: grafana/grafana:13.2.6
     restart: unless-stopped
-    depends_on:
-      - prometheus
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
       GF_SECURITY_COOKIE_SECURE: "true"
-      GF_SECURITY_DISABLE_GRAVATAR: "true"
-      GF_SECURITY_DISABLE_BRUTE_FORCE_LOGIN_PROTECTION: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
-      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
-      GF_NEWS_NEWS_FEED_ENABLED: "false"
-      # No plugin downloads at startup: the root filesystem is read-only anyway.
-      GF_PLUGINS_PREINSTALL_DISABLED: "true"
       GF_METRICS_ENABLED: "false"
       GF_SERVER_ROOT_URL: https://${DOMAIN:?DOMAIN is required}/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
-    secrets:
-      - source: grafana_admin_password
-        uid: "472"
-        gid: "472"
-        mode: 0400
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -205,40 +113,4 @@ services:
       - traefik.http.routers.grafana.rule=Host(`${DOMAIN:?DOMAIN is required}`) && PathPrefix(`/grafana`)
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.priority=100
-      - traefik.http.routers.grafana.middlewares=security-headers@file,grafana-ratelimit@file
       - traefik.http.services.grafana.loadbalancer.server.port=3000
-    networks:
-      - edge
-      - monitoring
-    <<: *hardening
-    read_only: true
-    tmpfs:
-      - /tmp
-    logging: *default-logging
-
-secrets:
-  # Généré depuis GRAFANA_ADMIN_PASSWORD par stack/local-tls.sh en local et par
-  # scripts/vm-deploy.sh sur la VM. Jamais dans l'environnement du conteneur,
-  # donc jamais dans `docker inspect`.
-  grafana_admin_password:
-    file: ./secrets/grafana_admin_password
-
-networks:
-  # Sous-réseaux épinglés : app/Program.cs ne fait confiance qu'à 10.89.0.0/24
-  # pour les en-têtes X-Forwarded-*.
-  edge:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 10.89.0.0/24
-  monitoring:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 10.89.1.0/24
-  socket:
-    driver: bridge
-    internal: true
-    ipam:
-      config:
-        - subnet: 10.89.2.0/24

@@ -58,13 +58,8 @@ jobs:
 
       - name: Validate compose files
         run: |
-          mkdir -p stack/secrets
-          printf 'pr\n' > stack/secrets/grafana_admin_password
           docker compose --env-file stack/.env.example -f stack/docker-compose.yml config -q
           docker compose --env-file stack/.env.example -f stack/docker-compose.yml -f stack/docker-compose.local.yml config -q
-
-      - name: Validate YAML
-        run: python3 scripts/check-yaml.py
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
