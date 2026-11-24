@@ -1,4 +1,5 @@
-# Copy to terraform.tfvars and adjust. Every value below is the variable default.
+# Copy to terraform.tfvars and adjust. The comments say which values differ from
+# the module defaults in infra/variables.tf; everything else mirrors them.
 
 prefix              = "democours"
 location            = "francecentral"
@@ -11,8 +12,10 @@ admin_ssh_public_key = "ssh-ed25519 AAAA... you@example.com"
 # Optional: repository cloned on the VM.
 repo_url = "https://github.com/adam-benyekkou/demo-cours-docker-intro.git"
 
-# Required: produces <dns_label>.<location>.cloudapp.azure.com
-# Must be globally unique, 3-63 lowercase alphanumeric characters or hyphens.
+# Optional, defaults to "demo-cours-docker" (variables.tf). Produces
+# <dns_label>.<location>.cloudapp.azure.com and must be unique in the region:
+# 3-63 lowercase alphanumeric characters or hyphens. The value below is only an
+# example, which is why it differs from the default.
 dns_label = "demo-cours-docker-adam"
 
 vm_size            = "Standard_B2s"

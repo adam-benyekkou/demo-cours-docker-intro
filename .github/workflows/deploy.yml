@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Only main deploys. `workflow_dispatch` exists to replay a run by hand, which is
+# why every job also checks github.ref: a dispatch from another branch must not
+# reach the production environment or its OIDC token.
+
 permissions:
   contents: read
 
@@ -150,10 +154,12 @@ jobs:
           echo "::add-mask::$(cat /tmp/env.b64)"
           echo "b64=$(cat /tmp/env.b64)" >> "$GITHUB_OUTPUT"
 
-      # run-command create/update keeps env_b64 as a protected parameter: Azure
-      # never writes its value to the run-command history nor to the job log.
-      # `run` changes on every workflow run: a PUT only re-executes the script
-      # when the run-command body differs.
+      # The run-command body is scripts/vm-deploy.sh, sent as-is. Two constraints
+      # drive the shape below:
+      #   - `create` needs a --location, `update` refuses one, so the action is
+      #     probed first and any API error must abort instead of falling back;
+      #   - env_b64 goes through --protected-parameters, so Azure keeps it out of
+      #     both the job log and the run-command history.
       - name: Run deploy script on the VM
         env:
           FQDN: ${{ needs.infra.outputs.fqdn }}
@@ -213,6 +219,8 @@ jobs:
           base="https://${FQDN}"
           code() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
 
+          # The h1 of app/Views/Home/Index.cshtml is the witness string: change
+          # that heading and this assertion must change with it.
           curl -fsS --retry 12 --retry-delay 10 --retry-all-errors "${base}/health" \
             | grep -q '"status":"Healthy"'
           curl -fsS "${base}/" | grep -q 'Bonjour depuis le conteneur'

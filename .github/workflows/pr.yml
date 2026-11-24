@@ -58,6 +58,8 @@ jobs:
       - name: validate
         run: terraform validate
 
+      # The plan is allowed to fail so its output still reaches the PR comment;
+      # the next step turns that failure into a red check.
       - name: plan
         id: plan
         env:

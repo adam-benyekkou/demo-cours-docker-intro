@@ -99,6 +99,8 @@ services:
   prometheus:
     image: prom/prometheus:v3.16.0
     restart: unless-stopped
+    # Start order only, not a health wait: Prometheus retries a target that is
+    # still down, so this only gives the scrapers a head start.
     depends_on:
       - cadvisor
       - traefik

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Prépare le test local : certificat auto-signé, secret Grafana et provider
-# fichiers local. La config dynamique de prod est copiée et complétée par le
-# certificat.
+# Prépare le test local, en trois choses : certificat auto-signé, secret Grafana
+# et provider fichiers local. La config dynamique de prod est copiée et
+# complétée par le certificat.
+#
+# Le nom vient de l'origine du script ; il fait aussi le secret Grafana parce que
+# les deux sont requis avant le premier `docker compose up`.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
