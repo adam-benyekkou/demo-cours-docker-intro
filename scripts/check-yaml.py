@@ -31,7 +31,9 @@ ComposeLoader.add_multi_constructor("!", any_tag)
 PATTERNS = (
     "stack/**/*.yml",
     ".github/workflows/*.yml",
+    ".github/dependabot.yml",
     "infra/cloud-init.yml",
+    ".trivyignore.yaml",
 )
 
 

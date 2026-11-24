@@ -4,11 +4,12 @@
 #
 # Creates:
 #   - rg-tfstate + storage account (remote Terraform state) + tfstate container
-#   - rg-demo-docker (holds the stack, created by terraform)
+#   - rg-demo-docker, the resource group that holds the whole stack
 #   - an Entra app registration + service principal with two federated
 #     credentials (GitHub OIDC, no client secret) and the two role assignments
-#   - a consumption budget when the CLI supports it (otherwise terraform does)
+#   - the exact `gh variable`, `gh secret` and `gh api` commands to run next
 #
+# The consumption budget belongs to Terraform (infra/budget.tf), not here.
 # Nothing secret is created or echoed: authentication is OIDC only.
 
 set -euo pipefail
@@ -121,7 +122,6 @@ SA_ID="$(az storage account show -g "$TF_STATE_RG" -n "$SA" --query id -o tsv)"
 # --- 3. Entra app registration + federation ---------------------------------
 APP_ID="$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv)"
 if [ -z "$APP_ID" ] || [ "$APP_ID" = "None" ]; then
-  APP_ID=""
   log "app registration $APP_NAME"
   APP_ID="$(az ad app create \
     --display-name "$APP_NAME" \
@@ -190,9 +190,12 @@ assign_role "Storage Blob Data Contributor" "$SA_ID"
 # --- 5. GitHub configuration ------------------------------------------------
 cat <<EOF
 
-Bootstrap done. No secret was created: GitHub authenticates with OIDC.
+Bootstrap done. No secret was created here: GitHub authenticates with OIDC.
 
-Set these repository variables (then let terraform read the state below):
+This block is the reference for the manual GitHub configuration; the README
+only points to it, so the two cannot drift apart.
+
+Repository variables:
 
   gh variable set AZURE_CLIENT_ID --repo $GH_REPO --body "$APP_ID"
   gh variable set AZURE_TENANT_ID --repo $GH_REPO --body "$TENANT_ID"
@@ -200,11 +203,11 @@ Set these repository variables (then let terraform read the state below):
   gh variable set TF_STATE_RESOURCE_GROUP --repo $GH_REPO --body "$TF_STATE_RG"
   gh variable set TF_STATE_STORAGE_ACCOUNT --repo $GH_REPO --body "$SA"
 
-Set the break-glass SSH public key installed on the VM:
+Break-glass SSH public key installed on the VM (no SSH port is open):
 
   gh variable set ADMIN_SSH_PUBLIC_KEY --repo $GH_REPO --body "$(cat ~/.ssh/id_ed25519.pub)"
 
-Set the alert recipients as a Terraform list (enables the budget in infra/budget.tf):
+Alert recipients as a Terraform list (this is what enables infra/budget.tf):
 
   gh variable set BUDGET_CONTACT_EMAILS --repo $GH_REPO --body '["you@example.com"]'
 
@@ -212,7 +215,7 @@ Make the GHCR package readable by the VM (no registry login on the host):
 
   gh api -X PATCH /user/packages/container/demo-cours-docker-intro%2Fapp -f visibility=public
 
-Set the Grafana admin password (the prompt keeps it out of the shell history):
+Grafana admin password (the prompt keeps it out of the shell history):
 
   gh secret set GRAFANA_ADMIN_PASSWORD --repo $GH_REPO
 
@@ -224,13 +227,11 @@ environment and its OIDC token:
     -f 'deployment_branch_policy[custom_branch_policies]=true'
   gh api -X POST repos/$GH_REPO/environments/production/deployment-branch-policies -f name=main
 
-Terraform backend settings for the CI init step:
+Terraform state for this stack lives in that storage account. CI passes the two
+values generated above; the container, the state key and Azure AD auth are
+already committed in infra/backend.tf:
 
-  resource_group_name  = $TF_STATE_RG
-  storage_account_name = $SA
-  container_name       = $STATE_CONTAINER
-  key                  = demo-cours-docker-intro.tfstate
-  use_oidc             = true
-  use_azuread_auth     = true
+  terraform init -backend-config="resource_group_name=$TF_STATE_RG" \
+                 -backend-config="storage_account_name=$SA"
 
 EOF

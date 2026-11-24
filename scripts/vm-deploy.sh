@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Exécuté sur la VM par la CI, via `az vm run-command` (pas de port 22).
-# Arguments key=value, liste fermée : image=<ref>, sha=<commit>, domain=<fqdn>,
-# env_b64=<.env en base64 et paramètre protégé côté Azure>.
+# Runs on the VM through `az vm run-command` (no SSH port is open).
+# Arguments are key=value pairs and this list is closed:
+#   image=<registry ref>   sha=<40-char commit>   domain=<public FQDN>
+#   repo=<clone URL>       run=<unique nonce>
+#   env_b64=<.env, base64: sent as an Azure protected parameter>
+#
+# `run` is never read: it only makes the run-command body differ on every CI
+# run, because `az vm run-command update` re-executes the script only when the
+# body changes.
 set -euo pipefail
 
 export HOME="${HOME:-/root}"
@@ -20,10 +26,10 @@ for arg in "$@"; do
     esac
 done
 
-: "${image:?image manquante}"
-: "${sha:?sha manquant}"
-: "${domain:?domain manquant}"
-: "${env_b64:?env_b64 manquant}"
+: "${image:?image missing}"
+: "${sha:?sha missing}"
+: "${domain:?domain missing}"
+: "${env_b64:?env_b64 missing}"
 
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || fail "sha is not a full commit id: $sha"
 
