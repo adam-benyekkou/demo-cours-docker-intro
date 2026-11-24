@@ -12,6 +12,9 @@ for arg in "$@"; do export "${arg}"; done
 STACK_DIR=/opt/demo-stack
 REPO_URL=https://github.com/adam-benyekkou/demo-cours-docker-intro.git
 
+# cloud-init hands the clone to azureuser; run-command runs as root.
+git config --global --add safe.directory "$STACK_DIR"
+
 if [ -d "$STACK_DIR/.git" ]; then
     git -C "$STACK_DIR" fetch --prune origin main
     git -C "$STACK_DIR" reset --hard origin/main
