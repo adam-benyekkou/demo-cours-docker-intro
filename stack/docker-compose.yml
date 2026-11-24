@@ -6,12 +6,20 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+# Moindre privilège pour tous les services. Ceux qui écrivent à l'exécution
+# reçoivent en plus read_only + tmpfs, voir chaque service.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
 services:
   # Proxy en lecture seule devant le socket Docker : Traefik découvre les
-  # conteneurs sans jamais pouvoir en créer ou en supprimer.
+  # conteneurs sans jamais pouvoir en créer ou en supprimer. Il vit sur son
+  # propre réseau interne, hors de portée des conteneurs applicatifs.
   socket-proxy:
     image: tecnativa/docker-socket-proxy:3.4
-    container_name: socket-proxy
     restart: unless-stopped
     environment:
       CONTAINERS: "1"
@@ -24,14 +32,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-      - edge
-    security_opt:
-      - no-new-privileges:true
+      - socket
+    <<: *hardening
     logging: *default-logging
 
   traefik:
     image: traefik:v3.8.0
-    container_name: traefik
     restart: unless-stopped
     depends_on:
       - socket-proxy
@@ -53,34 +59,45 @@ services:
     networks:
       - edge
       - monitoring
+      - socket
+    <<: *hardening
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp
     logging: *default-logging
 
   app:
     image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
-    container_name: app
     restart: unless-stopped
     environment:
       APP_VERSION: ${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
+      # Racine en lecture seule : .NET range ses clés de protection sous $HOME.
+      HOME: /tmp
+      # Prometheus interroge http://app:8080 : son en-tête Host doit passer.
+      AllowedHosts: "${DOMAIN:?DOMAIN is required};app"
     expose:
       - "8080"
     labels:
       - traefik.enable=true
-      # /metrics reste interne : Prometheus l'appelle directement sur le réseau.
-      - traefik.docker.network=demo-stack_edge
+      # /metrics reste interne : Prometheus l'appelle sur le réseau Docker.
       - traefik.http.routers.app.rule=Host(`${DOMAIN:?DOMAIN is required}`) && !PathPrefix(`/metrics`)
       - traefik.http.routers.app.entrypoints=websecure
       - traefik.http.routers.app.priority=10
-      - traefik.http.routers.app.tls=true
-      - traefik.http.routers.app.tls.certresolver=le
+      - traefik.http.routers.app.middlewares=security-headers@file
       - traefik.http.services.app.loadbalancer.server.port=8080
     networks:
       - edge
       - monitoring
+    <<: *hardening
+    read_only: true
+    tmpfs:
+      - /tmp
     logging: *default-logging
 
   prometheus:
     image: prom/prometheus:v3.16.0
-    container_name: prometheus
     restart: unless-stopped
     depends_on:
       - cadvisor
@@ -89,7 +106,6 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
-      - --web.enable-lifecycle
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - /data/prometheus:/prometheus
@@ -101,11 +117,14 @@ services:
       start_period: 20s
     networks:
       - monitoring
+    <<: *hardening
+    read_only: true
+    tmpfs:
+      - /tmp
     logging: *default-logging
 
   node-exporter:
     image: prom/node-exporter:v1.13.1
-    container_name: node-exporter
     restart: unless-stopped
     pid: host
     command:
@@ -115,67 +134,104 @@ services:
       - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($|/)
     volumes:
       - /:/host:ro,rslave
-    security_opt:
-      - no-new-privileges:true
     networks:
       - monitoring
+    <<: *hardening
+    read_only: true
     logging: *default-logging
 
+  # cAdvisor garde un accès direct au socket Docker : depuis la v0.53.0 sa
+  # fabrique Docker ouvre aussi le socket gRPC de containerd, qu'un proxy HTTP
+  # ne peut pas fournir. Seul le socket est monté, pas tout /var/run.
+  # Voir « Limites connues » dans le README.
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.55.1
-    container_name: cadvisor
     restart: unless-stopped
     command:
       - --docker_only=true
       - --housekeeping_interval=15s
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     devices:
       - /dev/kmsg
-    security_opt:
-      - no-new-privileges:true
     networks:
       - monitoring
+    <<: *hardening
+    read_only: true
+    tmpfs:
+      - /tmp
     logging: *default-logging
 
   grafana:
     image: grafana/grafana:13.2.6
-    container_name: grafana
     restart: unless-stopped
     depends_on:
       - prometheus
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
-      GF_SERVER_ROOT_URL: https://${DOMAIN:?DOMAIN is required}/grafana/
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_DISABLE_BRUTE_FORCE_LOGIN_PROTECTION: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_METRICS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: https://${DOMAIN:?DOMAIN is required}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    secrets:
+      - source: grafana_admin_password
+        uid: "472"
+        gid: "472"
+        mode: 0400
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - /data/grafana:/var/lib/grafana
     labels:
       - traefik.enable=true
-      - traefik.docker.network=demo-stack_edge
-      - traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)
+      - traefik.http.routers.grafana.rule=Host(`${DOMAIN:?DOMAIN is required}`) && PathPrefix(`/grafana`)
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.priority=100
-      - traefik.http.routers.grafana.tls=true
-      - traefik.http.routers.grafana.tls.certresolver=le
+      - traefik.http.routers.grafana.middlewares=security-headers@file,grafana-ratelimit@file
       - traefik.http.services.grafana.loadbalancer.server.port=3000
     networks:
       - edge
       - monitoring
+    <<: *hardening
+    read_only: true
+    tmpfs:
+      - /tmp
     logging: *default-logging
 
+secrets:
+  # Généré depuis GRAFANA_ADMIN_PASSWORD par stack/local-tls.sh en local et par
+  # scripts/vm-deploy.sh sur la VM. Jamais dans l'environnement du conteneur,
+  # donc jamais dans `docker inspect`.
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password
+
 networks:
+  # Sous-réseaux épinglés : app/Program.cs ne fait confiance qu'à 10.89.0.0/24
+  # pour les en-têtes X-Forwarded-*.
   edge:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.89.0.0/24
   monitoring:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.89.1.0/24
+  socket:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.2.0/24

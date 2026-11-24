@@ -22,7 +22,6 @@ APP_NAME="${APP_NAME:-demo-docker-cours-gh}"
 TF_STATE_RG="rg-tfstate"
 APP_RG="rg-demo-docker"
 STATE_CONTAINER="tfstate"
-FED_MAIN_NAME="gh-main"
 FED_PR_NAME="gh-pr"
 FED_ENV_NAME="gh-env-production"
 FED_ISSUER="https://token.actions.githubusercontent.com"
@@ -160,9 +159,9 @@ add_federated_credential() {
   }" -o none
 }
 
-add_federated_credential "$FED_MAIN_NAME" "repo:${GH_REPO}:ref:refs/heads/main"
 add_federated_credential "$FED_PR_NAME" "repo:${GH_REPO}:pull_request"
-# Jobs that declare `environment: production` get this subject, not ref:refs/heads/main.
+# Deploy jobs declare `environment: production`, so their OIDC subject is
+# repo:<owner>/<repo>:environment:production, not ref:refs/heads/main.
 add_federated_credential "$FED_ENV_NAME" "repo:${GH_REPO}:environment:production"
 
 # --- 4. Role assignments ----------------------------------------------------
@@ -201,6 +200,10 @@ Set these repository variables (then let terraform read the state below):
   gh variable set TF_STATE_RESOURCE_GROUP --repo $GH_REPO --body "$TF_STATE_RG"
   gh variable set TF_STATE_STORAGE_ACCOUNT --repo $GH_REPO --body "$SA"
 
+Set the break-glass SSH public key installed on the VM:
+
+  gh variable set ADMIN_SSH_PUBLIC_KEY --repo $GH_REPO --body "$(cat ~/.ssh/id_ed25519.pub)"
+
 Set the alert recipients as a Terraform list (enables the budget in infra/budget.tf):
 
   gh variable set BUDGET_CONTACT_EMAILS --repo $GH_REPO --body '["you@example.com"]'
@@ -212,6 +215,14 @@ Make the GHCR package readable by the VM (no registry login on the host):
 Set the Grafana admin password (the prompt keeps it out of the shell history):
 
   gh secret set GRAFANA_ADMIN_PASSWORD --repo $GH_REPO
+
+Restrict deployments to main: only that branch may use the production
+environment and its OIDC token:
+
+  gh api -X PUT repos/$GH_REPO/environments/production \
+    -f 'deployment_branch_policy[protected_branches]=false' \
+    -f 'deployment_branch_policy[custom_branch_policies]=true'
+  gh api -X POST repos/$GH_REPO/environments/production/deployment-branch-policies -f name=main
 
 Terraform backend settings for the CI init step:
 

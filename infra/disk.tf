@@ -1,11 +1,11 @@
 resource "azurerm_managed_disk" "data" {
-  name                 = "${local.prefix}-data-disk"
-  location             = local.location
+  name                 = "${var.prefix}-data-disk"
+  location             = var.location
   resource_group_name  = data.azurerm_resource_group.main.name
   storage_account_type = "StandardSSD_LRS"
   create_option        = "Empty"
   disk_size_gb         = var.data_disk_size_gb
-  tags                 = local.tags
+  tags                 = var.tags
 
   # Holds demo state that must survive a rebuild of the VM.
   lifecycle {

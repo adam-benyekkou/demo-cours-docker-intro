@@ -1,6 +1,12 @@
 # Configuration statique de Traefik. Les routeurs viennent des labels Docker
 # du compose : c'est là qu'est la partie déclarative.
 
+# Les alias d'en-têtes (X_Auth_User pour X-Auth-User) sont supprimés avant
+# d'atteindre les backends : ils permettent de contourner les en-têtes gérés
+# par Traefik.
+global:
+  aliasHeadersStrategy: delete
+
 log:
   level: INFO
 
@@ -16,16 +22,13 @@ ping:
 entryPoints:
   web:
     address: ":80"
-    forwardedHeaders:
-      trustedIPs:
-        - 10.20.0.0/16
+  # Certificat Let's Encrypt pour tout routeur TLS de cet entrypoint ; le
+  # certificat auto-signé local reste servi tant que l'ACME n'a pas abouti.
   websecure:
     address: ":443"
     http:
-      tls: {}
-    forwardedHeaders:
-      trustedIPs:
-        - 10.20.0.0/16
+      tls:
+        certResolver: le
   traefik:
     address: ":8080"
   metrics:

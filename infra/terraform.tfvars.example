@@ -5,6 +5,12 @@ location            = "francecentral"
 resource_group_name = "rg-demo-docker"
 admin_username      = "azureuser"
 
+# Required: OpenSSH public key for the administrator account (break-glass only).
+admin_ssh_public_key = "ssh-ed25519 AAAA... you@example.com"
+
+# Optional: repository cloned on the VM.
+repo_url = "https://github.com/adam-benyekkou/demo-cours-docker-intro.git"
+
 # Required: produces <dns_label>.<location>.cloudapp.azure.com
 # Must be globally unique, 3-63 lowercase alphanumeric characters or hyphens.
 dns_label = "demo-cours-docker-adam"
