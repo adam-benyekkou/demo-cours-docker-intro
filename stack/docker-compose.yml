@@ -142,14 +142,17 @@ services:
     read_only: true
     logging: *default-logging
 
-  # cAdvisor garde un accès direct au socket Docker : depuis la v0.53.0 sa
-  # fabrique Docker ouvre aussi le socket gRPC de containerd, qu'un proxy HTTP
-  # ne peut pas fournir. Seul le socket est monté, pas tout /var/run.
-  # Voir « Limites connues » dans le README.
+  # cAdvisor lit les conteneurs à travers le socket-proxy : il ne monte aucun
+  # socket. Version épinglée en v0.52.0 exprès : dès la v0.53.0 sa fabrique
+  # Docker exige aussi le socket gRPC de containerd, qu'un proxy HTTP ne peut
+  # pas fournir. Les noms de conteneurs demandent le stockage Docker `overlay2`
+  # (cloud-init écrit /etc/docker/daemon.json) : avec le snapshotter containerd,
+  # cAdvisor ne retrouve pas la couche inscriptible et ne remonte rien.
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    image: gcr.io/cadvisor/cadvisor:v0.52.0
     restart: unless-stopped
     command:
+      - --docker=tcp://socket-proxy:2375
       - --docker_only=true
       - --housekeeping_interval=15s
     volumes:
@@ -157,11 +160,11 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     devices:
       - /dev/kmsg
     networks:
       - monitoring
+      - socket
     <<: *hardening
     read_only: true
     tmpfs:
