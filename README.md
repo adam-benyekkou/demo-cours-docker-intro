@@ -19,6 +19,62 @@ request sur `main`.
 | Terraform | VNet, NSG, IP publique, VM, disque de données, budget | `infra/` |
 | GitHub Actions | Contrôles en PR, déploiement sur `main` | `.github/workflows/` |
 
+## Infrastructure
+
+```mermaid
+flowchart LR
+  client([Navigateur])
+
+  subgraph azure["Azure — francecentral"]
+    pip["IP publique statique<br/>dns_label.francecentral.cloudapp.azure.com"]
+    nsg["NSG<br/>80 et 443 entrants<br/>aucun port d'administration"]
+
+    subgraph vm["VM democours-vm — Ubuntu 24.04"]
+      subgraph edge["réseau edge 10.89.0.0/24"]
+        traefik["traefik v3<br/>TLS Let's Encrypt"]
+        app["app .NET 10<br/>:8080"]
+        grafana["grafana<br/>sous /grafana/"]
+      end
+      subgraph monitoring["réseau monitoring 10.89.1.0/24"]
+        prometheus["prometheus<br/>15 j de rétention"]
+        cadvisor["cadvisor"]
+        node["node_exporter"]
+      end
+      subgraph socket["réseau socket — interne"]
+        proxy["socket-proxy<br/>POST=0"]
+      end
+      data[("disque /data<br/>acme, prometheus, grafana")]
+      sock(["docker.sock"])
+    end
+  end
+
+  github["GitHub Actions<br/>build, terraform, run-command"]
+  ghcr[("GHCR<br/>image taguée par SHA")]
+
+  client -->|"80 / 443"| pip --> nsg --> traefik
+  traefik -->|"/"| app
+  traefik -->|"/grafana/"| grafana
+  traefik --> data
+  prometheus -.->|scrape| app
+  prometheus -.->|scrape| traefik
+  prometheus -.->|scrape| cadvisor
+  prometheus -.->|scrape| node
+  prometheus --> data
+  grafana --> data
+  cadvisor --> sock
+  proxy --> sock
+  traefik -->|"API Docker"| proxy
+
+  github -->|OIDC| azure
+  github -->|push| ghcr
+  ghcr -.->|pull| vm
+  github -->|"run-command"| vm
+```
+
+Seuls 80 et 443 sont joignables depuis Internet. Prometheus, cAdvisor,
+node_exporter et socket-proxy ne sont sur aucun réseau publié, et l'interface
+d'administration de Traefik est désactivée.
+
 ## Flux de déploiement
 
 ```mermaid
