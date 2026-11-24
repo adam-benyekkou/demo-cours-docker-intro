@@ -1,0 +1,84 @@
+:root {
+    --bg: #12161c;
+    --panel: #1b222b;
+    --line: #2b3542;
+    --ink: #e6edf3;
+    --muted: #8fa3b8;
+    --accent: #38bdf8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+}
+
+.badge {
+    font-size: .78rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+nav a {
+    color: var(--ink);
+    text-decoration: none;
+    margin-left: 1.25rem;
+    border-bottom: 1px solid transparent;
+}
+
+nav a:hover { border-bottom-color: var(--accent); }
+
+main {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 2.5rem 2rem;
+}
+
+h1 { margin-top: 0; font-size: 2rem; }
+
+.lead { color: var(--muted); max-width: 60ch; }
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin-top: 2rem;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.25rem;
+}
+
+.card h2 { margin-top: 0; font-size: 1.05rem; color: var(--accent); }
+
+dl { margin: 0; }
+dt { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+dd { margin: .15rem 0 .9rem; font-variant-numeric: tabular-nums; word-break: break-word; }
+
+code { background: #0d1117; padding: .1rem .35rem; border-radius: 4px; }
+
+footer {
+    padding: 1.5rem 2rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .85rem;
+    text-align: center;
+}

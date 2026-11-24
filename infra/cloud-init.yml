@@ -1,0 +1,97 @@
+# Rendered by terraform templatefile(): dollar-brace expressions are Terraform
+# variables, bare $NAME are shell variables evaluated on the VM at first boot.
+#
+# This file must never write the stack environment file nor start the compose
+# stack: CI owns both. It only prepares the host.
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+
+write_files:
+  - path: /usr/local/sbin/setup-data-disk.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      DEVICE="${data_device}"
+      MOUNT="${data_mount}"
+
+      # The data disk is attached at LUN 0; wait for the device to appear.
+      for _ in $(seq 1 30); do
+        if [ -b "$DEVICE" ]; then
+          break
+        fi
+        sleep 2
+      done
+
+      if [ ! -b "$DEVICE" ]; then
+        echo "data disk $DEVICE not found" >&2
+        exit 1
+      fi
+
+      # Never reformat an already formatted disk.
+      if ! blkid "$DEVICE" >/dev/null 2>&1; then
+        mkfs.ext4 -F -L data "$DEVICE"
+      fi
+
+      UUID="$(blkid -s UUID -o value "$DEVICE")"
+      mkdir -p "$MOUNT"
+
+      if ! grep -q "UUID=$UUID" /etc/fstab; then
+        printf 'UUID=%s %s ext4 defaults,nofail 0 2\n' "$UUID" "$MOUNT" >> /etc/fstab
+      fi
+
+      if ! mountpoint -q "$MOUNT"; then
+        mount "$MOUNT"
+      fi
+
+      # Bind-mount targets used by the compose stack.
+      install -d -o root -g root -m 0755 "$MOUNT/traefik"
+      if [ ! -f "$MOUNT/traefik/acme.json" ]; then
+        install -o root -g root -m 0600 /dev/null "$MOUNT/traefik/acme.json"
+      fi
+      install -d -o 65534 -g 65534 -m 0755 "$MOUNT/prometheus"
+      install -d -o 472 -g 472 -m 0755 "$MOUNT/grafana"
+
+  - path: /usr/local/sbin/setup-docker.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # Official Docker apt repository, pinned to the Ubuntu codename.
+      install -m 0755 -d /etc/apt/keyrings
+      if [ ! -f /etc/apt/keyrings/docker.asc ]; then
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+      fi
+      chmod a+r /etc/apt/keyrings/docker.asc
+
+      CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+      ARCH="$(dpkg --print-architecture)"
+      printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' "$ARCH" "$CODENAME" \
+        > /etc/apt/sources.list.d/docker.list
+
+      apt-get update -y
+      DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      systemctl enable --now docker
+
+runcmd:
+  - [bash, /usr/local/sbin/setup-data-disk.sh]
+  - [bash, /usr/local/sbin/setup-docker.sh]
+  - |
+    APP_DIR="${app_dir}"
+    if [ ! -d "$APP_DIR/.git" ]; then
+      git clone --branch "${git_branch}" --single-branch "${git_url}" "$APP_DIR"
+    fi
+    chown -R "${admin_username}:${admin_username}" "$APP_DIR"

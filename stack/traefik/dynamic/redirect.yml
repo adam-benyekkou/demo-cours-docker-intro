@@ -1,0 +1,19 @@
+# Redirection HTTP -> HTTPS en provider fichier, pas sur l'entrypoint :
+# un redirect d'entrypoint casserait le challenge ACME HTTP-01.
+# Priorité 1 : le routeur interne du challenge (règle plus longue) passe avant.
+http:
+  routers:
+    http-catchall:
+      rule: HostRegexp(`^.+$`)
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: noop@internal
+      priority: 1
+
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true

@@ -1,0 +1,40 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*.tfvars
+!*.tfvars.example
+
+# Secrets / local env
+.env
+*.env
+!.env.example
+stack/tls/
+
+# Docker / build
+app/bin/
+app/obj/
+**/bin/
+**/obj/
+*.pid
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.user
+*.suo
+
+# Test local généré par stack/local-tls.sh
+stack/traefik/local-dynamic/

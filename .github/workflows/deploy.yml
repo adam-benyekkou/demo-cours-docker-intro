@@ -1,0 +1,162 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  APP_IMAGE: ghcr.io/${{ github.repository }}/app
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: true
+          tags: |
+            ${{ env.APP_IMAGE }}:${{ github.sha }}
+            ${{ env.APP_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  infra:
+    name: Terraform apply
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: infra
+    outputs:
+      fqdn: ${{ steps.outputs.outputs.fqdn }}
+      vm_name: ${{ steps.outputs.outputs.vm_name }}
+      resource_group: ${{ steps.outputs.outputs.resource_group }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.9
+          terraform_wrapper: false
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=demo-cours-docker-intro.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: apply
+        env:
+          TF_VAR_budget_contact_emails: ${{ vars.BUDGET_CONTACT_EMAILS }}
+        run: terraform apply -input=false -auto-approve -no-color
+
+      - name: read outputs
+        id: outputs
+        run: |
+          echo "fqdn=$(terraform output -raw fqdn)" >> "$GITHUB_OUTPUT"
+          echo "vm_name=$(terraform output -raw vm_name)" >> "$GITHUB_OUTPUT"
+          echo "resource_group=$(terraform output -raw resource_group_name)" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy stack on VM
+    needs: [build, infra]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ needs.infra.outputs.fqdn }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build stack env file
+        id: env
+        env:
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+          DOMAIN: ${{ needs.infra.outputs.fqdn }}
+          IMAGE_REF: ${{ env.APP_IMAGE }}:${{ needs.build.outputs.tag }}
+        run: |
+          {
+            echo "APP_IMAGE=${IMAGE_REF%:*}"
+            echo "APP_IMAGE_TAG=${IMAGE_REF##*:}"
+            echo "DOMAIN=${DOMAIN}"
+            echo "ACME_EMAIL=${ACME_EMAIL}"
+            echo "GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}"
+          } | base64 -w0 > /tmp/env.b64
+          echo "b64=$(cat /tmp/env.b64)" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$(cat /tmp/env.b64)"
+
+      - name: Run deploy script on the VM
+        env:
+          FQDN: ${{ needs.infra.outputs.fqdn }}
+          VM_NAME: ${{ needs.infra.outputs.vm_name }}
+          RESOURCE_GROUP: ${{ needs.infra.outputs.resource_group }}
+          IMAGE_REF: ${{ env.APP_IMAGE }}:${{ needs.build.outputs.tag }}
+          ENV_B64: ${{ steps.env.outputs.b64 }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+        run: |
+          az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts @scripts/vm-deploy.sh \
+            --parameters "image=$IMAGE_REF" "domain=$FQDN" "acme_email=$ACME_EMAIL" "env_b64=$ENV_B64" \
+            --query 'value[0].message' -o tsv
+
+      - name: Smoke test
+        env:
+          FQDN: ${{ needs.infra.outputs.fqdn }}
+        run: |
+          curl -fsS --retry 12 --retry-delay 10 --retry-all-errors "https://${FQDN}/health"
+          echo
+          curl -fsS -o /dev/null -w 'grafana %{http_code}\n' "https://${FQDN}/grafana/login"
+          curl -sI "http://${FQDN}/health" | head -1

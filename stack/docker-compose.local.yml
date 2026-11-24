@@ -1,0 +1,26 @@
+# Surcharge locale : volumes nommés au lieu des chemins /data de la VM,
+# et certificat auto-signé à la place de Let's Encrypt.
+# `stack/local-tls.sh` génère stack/tls/ et stack/traefik/local-dynamic/.
+services:
+  traefik:
+    # Les ports 80/443 de l'hôte sont souvent pris par d'autres conteneurs de cours.
+    ports: !override
+      - "18080:80"
+      - "18443:443"
+    volumes:
+      - ./traefik/local-dynamic:/etc/traefik/dynamic:ro
+      - ./tls:/certs:ro
+      - traefik-acme:/acme
+
+  prometheus:
+    volumes:
+      - prom-data:/prometheus
+
+  grafana:
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  traefik-acme:
+  prom-data:
+  grafana-data:

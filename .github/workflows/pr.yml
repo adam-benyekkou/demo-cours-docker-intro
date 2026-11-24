@@ -1,0 +1,147 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  terraform:
+    name: Terraform fmt / validate / plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.9
+          terraform_wrapper: false
+
+      - name: fmt
+        run: terraform fmt -check -recursive
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=demo-cours-docker-intro.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: validate
+        run: terraform validate
+
+      - name: plan
+        id: plan
+        run: terraform plan -input=false -no-color -lock=false -out=tfplan
+        continue-on-error: true
+
+      - name: comment plan on PR
+        uses: actions/github-script@v7
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          script: |
+            const body = [
+              `### Terraform plan — \`${{ steps.plan.outcome }}\``,
+              "```",
+              (process.env.PLAN || "(no output)").slice(-60000),
+              "```",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const mine = comments.data.find(c => c.user.type === "Bot" && c.body.startsWith("### Terraform plan"));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: fail if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  build:
+    name: Docker build + compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          tags: demo-cours-app:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Validate compose file
+        run: |
+          cp stack/.env.example stack/.env
+          docker compose --env-file stack/.env -f stack/docker-compose.yml config -q
+          docker compose --env-file stack/.env -f stack/docker-compose.yml -f stack/docker-compose.local.yml config -q
+          rm -f stack/.env
+
+      - name: Validate YAML
+        run: |
+          python3 - <<'PY'
+          import sys, yaml, glob
+
+          class ComposeLoader(yaml.SafeLoader):
+              pass
+
+          # Compose adds !override and !reset; keep the parsed node as-is.
+          def any_tag(loader, suffix, node):
+              if isinstance(node, yaml.SequenceNode):
+                  return loader.construct_sequence(node, deep=True)
+              if isinstance(node, yaml.MappingNode):
+                  return loader.construct_mapping(node, deep=True)
+              return loader.construct_scalar(node)
+
+          ComposeLoader.add_multi_constructor("!", any_tag)
+
+          bad = 0
+          paths = (
+              glob.glob("stack/**/*.yml", recursive=True)
+              + glob.glob(".github/workflows/*.yml")
+              + ["infra/cloud-init.yml"]
+          )
+          for path in paths:
+              try:
+                  list(yaml.load_all(open(path), Loader=ComposeLoader))
+              except Exception as exc:
+                  print(f"{path}: {exc}")
+                  bad = 1
+          sys.exit(bad)
+          PY

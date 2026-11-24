@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] — démo Docker</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <header>
+        <span class="badge">démo conteneurisation</span>
+        <nav>
+            <a href="/">Accueil</a>
+            <a href="/health">/health</a>
+            <a href="/metrics">/metrics</a>
+            <a href="/grafana/">Grafana</a>
+        </nav>
+    </header>
+    <main>
+        @RenderBody()
+    </main>
+    <footer>
+        Application factice — ASP.NET Core MVC, Traefik, Prometheus, Grafana, cAdvisor.
+    </footer>
+</body>
+</html>
