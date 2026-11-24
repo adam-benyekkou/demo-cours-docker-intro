@@ -1,13 +1,12 @@
 name: Deploy
 
+# Runs on the self-hosted runner installed on the VM itself (scripts/runner-install.sh),
+# on `push: main` only. A pull_request must never reach that runner: it executes
+# the code of the branch it checks out.
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
-# Only main deploys. `workflow_dispatch` exists to replay a run by hand, which is
-# why every job also checks github.ref: a dispatch from another branch must not
-# reach the production environment or its OIDC token.
 
 permissions:
   contents: read
@@ -17,210 +16,61 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TF_IN_AUTOMATION: "true"
-  TF_INPUT: "0"
-  ARM_USE_OIDC: "true"
-  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-  APP_IMAGE: ghcr.io/${{ github.repository }}/app
+  APP_IMAGE: demo-cours-app
 
 jobs:
-  build:
-    name: Build and push image
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
-
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.10.0
-
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.3.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # The tag is the full SHA: it is the only value the VM can resolve later.
-      - id: meta
-        run: echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.13.0
-        with:
-          context: app
-          push: true
-          tags: ${{ env.APP_IMAGE }}:${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  infra:
-    name: Terraform apply
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      contents: read
-      id-token: write
-    defaults:
-      run:
-        working-directory: infra
-    outputs:
-      fqdn: ${{ steps.outputs.outputs.fqdn }}
-      vm_name: ${{ steps.outputs.outputs.vm_name }}
-      resource_group: ${{ steps.outputs.outputs.resource_group }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
-
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
-        with:
-          terraform_version: 1.15.9
-          terraform_wrapper: false
-
-      - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.2.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: init
-        run: |
-          terraform init -input=false \
-            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}"
-
-      - name: apply
-        env:
-          TF_VAR_budget_contact_emails: ${{ vars.BUDGET_CONTACT_EMAILS || '[]' }}
-          TF_VAR_admin_ssh_public_key: ${{ vars.ADMIN_SSH_PUBLIC_KEY }}
-        run: terraform apply -input=false -auto-approve -no-color
-
-      - name: read outputs
-        id: outputs
-        run: |
-          {
-            echo "fqdn=$(terraform output -raw fqdn)"
-            echo "vm_name=$(terraform output -raw vm_name)"
-            echo "resource_group=$(terraform output -raw resource_group_name)"
-          } >> "$GITHUB_OUTPUT"
-
   deploy:
-    name: Deploy stack on VM
-    needs: [build, infra]
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://${{ needs.infra.outputs.fqdn }}
-    permissions:
-      contents: read
-      id-token: write
+    name: Build and deploy on the VM
+    runs-on: [self-hosted, democours]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
 
-      - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.2.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Build stack env file
-        id: env
+      # The stack reads its Grafana password from a mounted file, never from the
+      # container environment, so `docker inspect` never carries the value.
+      - name: Write stack environment
         env:
+          DOMAIN: ${{ vars.DOMAIN }}
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-          DOMAIN: ${{ needs.infra.outputs.fqdn }}
-          IMAGE: ${{ env.APP_IMAGE }}
-          TAG: ${{ needs.build.outputs.tag }}
         run: |
+          set -euo pipefail
+          : "${DOMAIN:?repository variable DOMAIN is empty}"
           : "${GRAFANA_ADMIN_PASSWORD:?secret GRAFANA_ADMIN_PASSWORD is empty}"
-          : "${DOMAIN:?fqdn output is empty}"
           case "$GRAFANA_ADMIN_PASSWORD" in
             *$'\n'*|*$'\r'*) echo "GRAFANA_ADMIN_PASSWORD must be a single line" >&2; exit 1 ;;
           esac
-          {
-            echo "APP_IMAGE=${IMAGE}"
-            echo "APP_IMAGE_TAG=${TAG}"
-            echo "DOMAIN=${DOMAIN}"
-            echo "GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}"
-          } | base64 -w0 > /tmp/env.b64
-          echo "::add-mask::$(cat /tmp/env.b64)"
-          echo "b64=$(cat /tmp/env.b64)" >> "$GITHUB_OUTPUT"
 
-      # The run-command body is scripts/vm-deploy.sh, sent as-is. Two constraints
-      # drive the shape below:
-      #   - `create` needs a --location, `update` refuses one, so the action is
-      #     probed first and any API error must abort instead of falling back;
-      #   - env_b64 goes through --protected-parameters, so Azure keeps it out of
-      #     both the job log and the run-command history.
-      - name: Run deploy script on the VM
-        env:
-          FQDN: ${{ needs.infra.outputs.fqdn }}
-          VM_NAME: ${{ needs.infra.outputs.vm_name }}
-          RESOURCE_GROUP: ${{ needs.infra.outputs.resource_group }}
-          IMAGE: ${{ env.APP_IMAGE }}:${{ needs.build.outputs.tag }}
-          SHA: ${{ github.sha }}
-          ENV_B64: ${{ steps.env.outputs.b64 }}
-          NONCE: ${{ github.run_id }}-${{ github.run_attempt }}
-          REPO: ${{ github.server_url }}/${{ github.repository }}.git
-          REMOTE_NAME: deploy-stack
+          umask 077
+          cat > stack/.env <<EOF
+          APP_IMAGE=${APP_IMAGE}
+          APP_IMAGE_TAG=${GITHUB_SHA}
+          DOMAIN=${DOMAIN}
+          GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+          EOF
+
+          install -d -m 0755 stack/secrets
+          printf '%s' "$GRAFANA_ADMIN_PASSWORD" > stack/secrets/grafana_admin_password
+          sudo -n chown 472:472 stack/secrets/grafana_admin_password
+          chmod 0400 stack/secrets/grafana_admin_password
+
+      - name: Build image
+        run: docker build -t "${APP_IMAGE}:${GITHUB_SHA}" app/
+
+      - name: Start the stack
         run: |
           set -euo pipefail
-          args=(--resource-group "$RESOURCE_GROUP" --vm-name "$VM_NAME" --run-command-name "$REMOTE_NAME")
-
-          # Any API error here must abort: silently taking the create path after
-          # an auth failure only produces a misleading conflict later.
-          existing="$(az vm run-command list --resource-group "$RESOURCE_GROUP" --vm-name "$VM_NAME" \
-            --query "[?name=='$REMOTE_NAME'].name | [0]" -o tsv)"
-          if [ "$existing" = "$REMOTE_NAME" ]; then
-            action=update
-          else
-            action=create
-            args+=(--location "$(az vm show --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --query location -o tsv)")
-          fi
-
-          rc=0
-          az vm run-command "$action" "${args[@]}" \
-            --script "$(cat scripts/vm-deploy.sh)" \
-            --parameters "image=$IMAGE" "sha=$SHA" "domain=$FQDN" "repo=$REPO" "run=$NONCE" \
-            --protected-parameters "env_b64=$ENV_B64" \
-            --timeout-in-seconds 1800 \
-            --output none || rc=$?
-
-          # Always print the remote output, including when az itself failed.
-          az vm run-command show "${args[@]}" --instance-view \
-            --query 'instanceView.{state:executionState,output:output,error:error}' -o json > /tmp/view.json
-          python3 - /tmp/view.json <<'PY'
-          import json, sys
-          view = json.load(open(sys.argv[1]))
-          print(f"run-command state: {view.get('state')}")
-          print(view.get("output") or "")
-          if view.get("error"):
-              print(view["error"], file=sys.stderr)
-          PY
-          state="$(python3 -c 'import json,sys; print(json.load(open("/tmp/view.json")).get("state",""))')"
-          if [ "$rc" -ne 0 ] || [ "$state" != "Succeeded" ]; then
-            echo "deploy failed: az exit $rc, run-command state $state" >&2
-            exit 1
-          fi
+          docker compose --env-file stack/.env -f stack/docker-compose.yml up -d --remove-orphans
+          docker image prune -f >/dev/null
+          docker compose --env-file stack/.env -f stack/docker-compose.yml ps
 
       - name: Smoke test
         env:
-          FQDN: ${{ needs.infra.outputs.fqdn }}
+          DOMAIN: ${{ vars.DOMAIN }}
         run: |
           set -euo pipefail
-          base="https://${FQDN}"
+          base="https://${DOMAIN}"
           code() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
 
-          # The h1 of app/Views/Home/Index.cshtml is the witness string: change
-          # that heading and this assertion must change with it.
           curl -fsS --retry 12 --retry-delay 10 --retry-all-errors "${base}/health" \
             | grep -q '"status":"Healthy"'
           curl -fsS "${base}/" | grep -q 'Bonjour depuis le conteneur'
