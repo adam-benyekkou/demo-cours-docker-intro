@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
 
+# Dockerfile — construit l'image de l'application en deux étapes.
+#
+# Étape build : SDK .NET 10 et publication Release. Étape final : image aspnet.
+# Modifier ici pour changer la version de .NET ou la commande de démarrage.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
@@ -14,8 +18,8 @@ WORKDIR /app
 
 COPY --from=build /out ./
 
-# The aspnet image already defines APP_UID=1654, ASPNETCORE_HTTP_PORTS=8080
-# and DOTNET_RUNNING_IN_CONTAINER=true.
+# L'image aspnet définit déjà APP_UID=1654, ASPNETCORE_HTTP_PORTS=8080
+# et DOTNET_RUNNING_IN_CONTAINER=true.
 USER $APP_UID
 EXPOSE 8080
 

@@ -1,3 +1,7 @@
+# network.tf — réseau virtuel, sous-réseau, NSG, IP publique et carte réseau.
+#
+# Toute la connectivité de la démo passe par ici. Seuls 80 et 443 sont ouverts
+# vers Internet ; SSH n'est jamais exposé.
 resource "azurerm_virtual_network" "main" {
   name                = "${var.prefix}-vnet"
   location            = var.location
@@ -13,8 +17,8 @@ resource "azurerm_subnet" "main" {
   address_prefixes     = ["10.20.1.0/24"]
 }
 
-# Only HTTP and HTTPS are reachable from the internet. No SSH: the VM is
-# operated through cloud-init and (if ever needed) the outbound-only path.
+# Seuls HTTP et HTTPS sont joignables depuis Internet. Pas de SSH : la VM est
+# administrée via cloud-init et, au besoin, par le canal sortant uniquement.
 resource "azurerm_network_security_group" "main" {
   name                = "${var.prefix}-nsg"
   location            = var.location
@@ -46,7 +50,7 @@ resource "azurerm_network_security_group" "main" {
   }
 }
 
-# dns_label is provided by the caller, so the name is already globally unique.
+# dns_label est fourni par l'appelant : le nom est donc déjà unique au niveau mondial.
 resource "azurerm_public_ip" "main" {
   name                = "${var.prefix}-pip"
   location            = var.location
@@ -71,8 +75,8 @@ resource "azurerm_network_interface" "main" {
   }
 }
 
-# azurerm 5.x exposes subnet.network_security_group_id as computed only, so the
-# association is its own resource.
+# azurerm 5.x n'expose subnet.network_security_group_id qu'en attribut calculé,
+# d'où une ressource d'association distincte.
 resource "azurerm_subnet_network_security_group_association" "main" {
   subnet_id                 = azurerm_subnet.main.id
   network_security_group_id = azurerm_network_security_group.main.id

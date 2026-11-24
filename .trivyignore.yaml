@@ -1,24 +1,27 @@
-# Deliberate exceptions for `trivy config`. Every entry states why the finding
-# is accepted; keep them few and specific.
+# .trivyignore.yaml — exceptions assumées du scan `trivy config`.
+#
+# Chaque entrée dit pourquoi le constat est accepté. À garder court et précis :
+# une exception sans justification vérifiable est une faille qu'on oublie.
+
 misconfigurations:
   - id: AZU-0047
     paths:
       - infra/network.tf
     statement: >-
-      Ports 80 and 443 are the public entrypoint of the demo. Everything else on
-      the NSG is denied by default, and no administration port is open.
+      Les ports 80 et 443 sont l'entrée publique de la démo. Tout le reste du
+      NSG est refusé par défaut et aucun port d'administration n'est ouvert.
 
   - id: AZU-0068
     paths:
       - infra/network.tf
     statement: >-
-      False positive: the NSG is attached through
-      azurerm_subnet_network_security_group_association, which the scan of the
-      subnet block does not follow.
+      Faux positif : le NSG est rattaché par
+      azurerm_subnet_network_security_group_association, que le scan du bloc
+      subnet ne suit pas.
 
   - id: AZU-0076
     paths:
       - infra/network.tf
     statement: >-
-      The demo is served from a single public IP, that is the point of the
-      exercise. Traefik terminates TLS and only exposes 80/443.
+      La démo est servie depuis une seule IP publique, c'est le principe de
+      l'exercice. Traefik termine le TLS et n'expose que 80 et 443.

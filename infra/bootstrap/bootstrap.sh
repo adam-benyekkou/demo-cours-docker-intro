@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
+# bootstrap.sh — amorçage Azure unique (rejouable) de la stack de démo.
 #
-# One-time (re-runnable) Azure bootstrap for the demo stack.
+# À lancer une seule fois, avant le premier terraform init : crée le stockage du
+# state distant et le groupe de ressources que Terraform ne peut pas créer
+# lui-même :
+#   - rg-tfstate + compte de stockage + conteneur tfstate (state distant)
+#   - rg-demo-docker, le groupe de ressources qui porte toute la stack
 #
-# Creates only what Terraform cannot create for itself:
-#   - rg-tfstate + storage account + tfstate container (remote state)
-#   - rg-demo-docker, the resource group that holds the whole stack
+# Aucune identité Azure et aucun secret ne sont créés : la CI tourne sur un
+# runner auto-hébergé installé sur la VM et n'appelle jamais l'API Azure.
+# Terraform est appliqué à la main, avec votre `az login`.
 #
-# No Azure identity is created: the CI runs on a self-hosted runner installed on
-# the VM, so it never calls the Azure API. Terraform is applied by hand, with
-# your own `az login`.
-#
-# Requires: az (logged in), openssl.
+# Prérequis : az (connecté), openssl.
 
 set -euo pipefail
 
-# --- driver variables -------------------------------------------------------
+# --- variables du script ----------------------------------------------------
 SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-}"
 LOCATION="${LOCATION:-francecentral}"
 
@@ -22,7 +23,7 @@ TF_STATE_RG="rg-tfstate"
 APP_RG="rg-demo-docker"
 STATE_CONTAINER="tfstate"
 
-# --- helpers ----------------------------------------------------------------
+# --- fonctions utilitaires --------------------------------------------------
 log() { printf '==> %s\n' "$*"; }
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -42,7 +43,7 @@ az account set --subscription "$SUBSCRIPTION_ID"
 log "subscription: $SUBSCRIPTION_ID"
 log "location:     $LOCATION"
 
-# --- 1. Terraform state storage ---------------------------------------------
+# --- 1. stockage du state Terraform -----------------------------------------
 log "resource group $TF_STATE_RG"
 az group create --name "$TF_STATE_RG" --location "$LOCATION" -o none
 
@@ -50,10 +51,10 @@ SA=""
 if [ -n "${TF_STATE_STORAGE_ACCOUNT:-}" ]; then
   SA="$TF_STATE_STORAGE_ACCOUNT"
 else
-  # Reuse the state account created by a previous run of this script.
+  # Réutilise le compte de stockage créé par une exécution précédente du script.
   SA="$(az storage account list -g "$TF_STATE_RG" \
     --query "[?starts_with(name, 'tfstate')].name | [0]" -o tsv)"
-  # An empty JMESPath result is printed as the string "None".
+  # Un résultat JMESPath vide est affiché comme la chaîne "None".
   if [ "$SA" = "None" ]; then
     SA=""
   fi
@@ -102,11 +103,11 @@ if ! az storage container show --account-name "$SA" --name "$STATE_CONTAINER" --
     -o none
 fi
 
-# --- 2. Application resource group ------------------------------------------
+# --- 2. groupe de ressources de l'application --------------------------------
 log "resource group $APP_RG"
 az group create --name "$APP_RG" --location "$LOCATION" -o none
 
-# --- 3. What comes next -----------------------------------------------------
+# --- 3. étapes suivantes -----------------------------------------------------
 cat <<EOF
 
 Bootstrap done. No Azure identity and no secret were created.

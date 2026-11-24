@@ -1,3 +1,8 @@
+# pr.yml — exécute les contrôles d'une pull request : Terraform, build, scan.
+#
+# Lu par GitHub Actions à chaque pull request visant main. On y modifie une étape
+# quand un contrôle change ; les actions et leurs versions restent épinglées.
+# Il ne déploie rien : le build se fait sans push.
 name: PR checks
 
 on:
@@ -29,9 +34,10 @@ jobs:
       - name: fmt
         run: terraform fmt -check -recursive
 
-      # No Azure credentials in CI: `terraform plan` needs the remote state and a
-      # token, so it is run by hand (see README). Validate needs neither, as long
-      # as the backend is not initialised.
+      # Aucun identifiant Azure dans la CI : `terraform plan` demande l'état
+      # distant et un jeton, il est donc lancé à la main (voir le README).
+      # `validate` n'a besoin ni de l'un ni de l'autre, tant que le backend n'est
+      # pas initialisé.
       - name: init
         run: terraform init -backend=false -input=false
 

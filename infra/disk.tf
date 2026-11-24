@@ -1,3 +1,7 @@
+# disk.tf — disque de données persistant, attaché à la VM au LUN 0.
+#
+# Il porte l'état de la démo (Traefik, Prometheus, Grafana) créé par cloud-init.
+# Formatage et montage sont faits par cloud-init, pas par Terraform.
 resource "azurerm_managed_disk" "data" {
   name                 = "${var.prefix}-data-disk"
   location             = var.location
@@ -7,7 +11,7 @@ resource "azurerm_managed_disk" "data" {
   disk_size_gb         = var.data_disk_size_gb
   tags                 = var.tags
 
-  # Holds demo state that must survive a rebuild of the VM.
+  # Contient l'état de la démo qui doit survivre à une reconstruction de la VM.
   lifecycle {
     prevent_destroy = true
   }

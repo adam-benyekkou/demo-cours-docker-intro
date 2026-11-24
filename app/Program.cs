@@ -1,3 +1,8 @@
+// Program.cs — point d'entrée de l'application MVC et de son endpoint /health.
+//
+// Câblage de l'application : services, middlewares, routes et métriques.
+// Modifier ici pour brancher un nouveau service ou une nouvelle route.
+// Il ne contient aucune logique métier, seulement la configuration.
 using DemoApp;
 using Prometheus;
 

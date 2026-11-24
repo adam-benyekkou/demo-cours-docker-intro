@@ -1,3 +1,8 @@
+# .gitignore — liste ce qui ne doit jamais entrer dans le dépôt.
+#
+# État Terraform, fichiers `.env`, secrets locaux et artefacts de build. Le
+# `!.env.example` et le `!*.tfvars.example` gardent les modèles versionnés.
+
 # Terraform
 **/.terraform/*
 *.tfstate
@@ -19,7 +24,7 @@ terraform.rc
 .env.*
 !.env.example
 
-# Build
+# Compilation
 **/bin/
 **/obj/
 

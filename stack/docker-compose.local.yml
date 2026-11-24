@@ -1,6 +1,7 @@
-# Surcharge locale : volumes nommés au lieu des chemins /data de la VM, et
-# ports 18080/18443 (les ports 80/443 de l'hôte sont souvent pris par d'autres
-# conteneurs de cours). Traefik sert alors son certificat auto-signé par défaut.
+# docker-compose.local.yml — surcharge locale de la stack.
+#
+# À utiliser par-dessus docker-compose.yml : volumes nommés au lieu des chemins /data de la VM, et ports 18080/18443.
+# Les ports 80/443 de l'hôte sont souvent pris par d'autres conteneurs de cours ; Traefik sert alors son certificat auto-signé par défaut.
 services:
   traefik:
     ports: !override

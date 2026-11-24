@@ -1,4 +1,9 @@
-# Labels of the self-hosted runner installed by scripts/runner-install.sh.
+# actionlint.yml — décrit les labels du runner self-hosted pour actionlint.
+#
+# Lu par actionlint, en local comme en CI, pour accepter ces labels dans les
+# workflows. On le modifie en même temps que scripts/runner-install.sh ; il ne
+# configure pas le runner.
+# Labels du runner self-hosted installé par scripts/runner-install.sh.
 self-hosted-runner:
   labels:
     - democours

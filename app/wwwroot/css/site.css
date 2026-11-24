@@ -1,3 +1,8 @@
+/* site.css — feuille de style unique des vues de la démo. */
+/*
+ * Chargée par _Layout.cshtml pour toutes les pages qu'il coiffe.
+ * Définit couleurs et grille ; aucun style calculé côté serveur.
+ */
 :root {
     --bg: #12161c;
     --panel: #1b222b;

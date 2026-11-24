@@ -1,8 +1,13 @@
+# deploy.yml — construit et déploie la stack sur la VM à chaque push sur main.
+#
+# Lu par GitHub Actions pour push: main et workflow_dispatch seulement. Il tourne
+# sur le runner self-hosted de la VM, jamais sur un runner hébergé, et ne déploie
+# aucune autre branche.
 name: Deploy
 
-# Runs on the self-hosted runner installed on the VM itself (scripts/runner-install.sh),
-# on `push: main` only. A pull_request must never reach that runner: it executes
-# the code of the branch it checks out.
+# Tourne sur le runner self-hosted installé sur la VM elle-même (scripts/runner-install.sh),
+# et uniquement sur `push: main`. Une pull_request ne doit jamais atteindre ce runner :
+# il exécute le code de la branche qu'il checkout.
 on:
   push:
     branches: [main]
@@ -61,8 +66,8 @@ jobs:
             | grep -q '"status":"Healthy"'
           curl -fsS "${base}/" | grep -q 'Bonjour depuis le conteneur'
 
-          # Grafana starts slower than the rest (migrations, plugin bootstrap):
-          # wait for its login page instead of testing it once.
+          # Grafana démarre plus lentement que le reste (migrations, bootstrap des plugins) :
+          # on attend sa page de login au lieu de la tester une seule fois.
           wait_for() {
             for _ in $(seq 1 18); do
               [ "$(code "$1")" = "$2" ] && return 0
