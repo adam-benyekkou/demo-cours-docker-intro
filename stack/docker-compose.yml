@@ -16,12 +16,9 @@ services:
     environment:
       CONTAINERS: "1"
       EVENTS: "1"
-      IMAGES: "1"
       INFO: "1"
       NETWORKS: "1"
       PING: "1"
-      SERVICES: "1"
-      TASKS: "1"
       VERSION: "1"
       POST: "0"
     volumes:
@@ -38,10 +35,6 @@ services:
     restart: unless-stopped
     depends_on:
       - socket-proxy
-    command:
-      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.le.acme.storage=/acme/acme.json
-      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
     ports:
       - "80:80"
       - "443:443"
@@ -63,18 +56,20 @@ services:
     logging: *default-logging
 
   app:
-    image: ${APP_IMAGE}:${APP_IMAGE_TAG}
+    image: ${APP_IMAGE:?APP_IMAGE is required}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
     container_name: app
     restart: unless-stopped
     environment:
-      APP_VERSION: ${APP_IMAGE_TAG}
+      APP_VERSION: ${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
     expose:
       - "8080"
     labels:
       - traefik.enable=true
-      - traefik.docker.network=edge
-      - traefik.http.routers.app.rule=Host(`${DOMAIN}`)
+      # /metrics reste interne : Prometheus l'appelle directement sur le réseau.
+      - traefik.docker.network=demo-stack_edge
+      - traefik.http.routers.app.rule=Host(`${DOMAIN:?DOMAIN is required}`) && !PathPrefix(`/metrics`)
       - traefik.http.routers.app.entrypoints=websecure
+      - traefik.http.routers.app.priority=10
       - traefik.http.routers.app.tls=true
       - traefik.http.routers.app.tls.certresolver=le
       - traefik.http.services.app.loadbalancer.server.port=8080
@@ -108,6 +103,24 @@ services:
       - monitoring
     logging: *default-logging
 
+  node-exporter:
+    image: prom/node-exporter:v1.13.1
+    container_name: node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($|/)
+    volumes:
+      - /:/host:ro,rslave
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - monitoring
+    logging: *default-logging
+
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.55.1
     container_name: cadvisor
@@ -137,8 +150,8 @@ services:
       - prometheus
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_SERVER_ROOT_URL: https://${DOMAIN}/grafana/
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_SERVER_ROOT_URL: https://${DOMAIN:?DOMAIN is required}/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
@@ -149,9 +162,10 @@ services:
       - /data/grafana:/var/lib/grafana
     labels:
       - traefik.enable=true
-      - traefik.docker.network=edge
+      - traefik.docker.network=demo-stack_edge
       - traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)
       - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.priority=100
       - traefik.http.routers.grafana.tls=true
       - traefik.http.routers.grafana.tls.certresolver=le
       - traefik.http.services.grafana.loadbalancer.server.port=3000

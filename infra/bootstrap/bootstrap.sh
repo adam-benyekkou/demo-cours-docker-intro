@@ -24,10 +24,9 @@ APP_RG="rg-demo-docker"
 STATE_CONTAINER="tfstate"
 FED_MAIN_NAME="gh-main"
 FED_PR_NAME="gh-pr"
+FED_ENV_NAME="gh-env-production"
 FED_ISSUER="https://token.actions.githubusercontent.com"
 FED_AUDIENCE="api://AzureADTokenExchange"
-BUDGET_AMOUNT="20"
-BUDGET_START="2026-11-01"
 
 # --- helpers ----------------------------------------------------------------
 log() { printf '==> %s\n' "$*"; }
@@ -64,6 +63,10 @@ else
   # Reuse the state account created by a previous run of this script.
   SA="$(az storage account list -g "$TF_STATE_RG" \
     --query "[?starts_with(name, 'tfstate')].name | [0]" -o tsv)"
+  # An empty JMESPath result is printed as the string "None".
+  if [ "$SA" = "None" ]; then
+    SA=""
+  fi
 fi
 
 if [ -z "$SA" ]; then
@@ -118,7 +121,8 @@ SA_ID="$(az storage account show -g "$TF_STATE_RG" -n "$SA" --query id -o tsv)"
 
 # --- 3. Entra app registration + federation ---------------------------------
 APP_ID="$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv)"
-if [ -z "$APP_ID" ]; then
+if [ -z "$APP_ID" ] || [ "$APP_ID" = "None" ]; then
+  APP_ID=""
   log "app registration $APP_NAME"
   APP_ID="$(az ad app create \
     --display-name "$APP_NAME" \
@@ -129,12 +133,14 @@ else
 fi
 
 SP_OBJECT_ID="$(az ad sp list --filter "appId eq '$APP_ID'" --query "[0].id" -o tsv)"
-if [ -z "$SP_OBJECT_ID" ]; then
+if [ -z "$SP_OBJECT_ID" ] || [ "$SP_OBJECT_ID" = "None" ]; then
   log "service principal"
   az ad sp create --id "$APP_ID" -o none
   SP_OBJECT_ID="$(az ad sp list --filter "appId eq '$APP_ID'" --query "[0].id" -o tsv)"
 fi
-[ -n "$SP_OBJECT_ID" ] || die "could not resolve the service principal object id"
+if [ -z "$SP_OBJECT_ID" ] || [ "$SP_OBJECT_ID" = "None" ]; then
+  die "could not resolve the service principal object id"
+fi
 
 add_federated_credential() {
   local name="$1"
@@ -156,6 +162,8 @@ add_federated_credential() {
 
 add_federated_credential "$FED_MAIN_NAME" "repo:${GH_REPO}:ref:refs/heads/main"
 add_federated_credential "$FED_PR_NAME" "repo:${GH_REPO}:pull_request"
+# Jobs that declare `environment: production` get this subject, not ref:refs/heads/main.
+add_federated_credential "$FED_ENV_NAME" "repo:${GH_REPO}:environment:production"
 
 # --- 4. Role assignments ----------------------------------------------------
 assign_role() {
@@ -180,24 +188,7 @@ assign_role() {
 assign_role "Contributor" "$APP_RG_ID"
 assign_role "Storage Blob Data Contributor" "$SA_ID"
 
-# --- 5. Budget (CLI support is optional) ------------------------------------
-if az consumption budget create --help >/dev/null 2>&1; then
-  log "consumption budget"
-  if ! az consumption budget create \
-    --budget-name "${APP_NAME}-monthly" \
-    --category Cost \
-    --amount "$BUDGET_AMOUNT" \
-    --time-grain Monthly \
-    --time-period start-date="$BUDGET_START" \
-    --resource-group "$APP_RG" \
-    -o none 2>/dev/null; then
-    warn "could not create the budget with this CLI; infra/budget.tf manages it"
-  fi
-else
-  warn "this az CLI has no 'consumption budget' support; infra/budget.tf manages the budget"
-fi
-
-# --- 6. GitHub configuration ------------------------------------------------
+# --- 5. GitHub configuration ------------------------------------------------
 cat <<EOF
 
 Bootstrap done. No secret was created: GitHub authenticates with OIDC.
@@ -213,6 +204,10 @@ Set these repository variables (then let terraform read the state below):
 Set the alert recipients as a Terraform list (enables the budget in infra/budget.tf):
 
   gh variable set BUDGET_CONTACT_EMAILS --repo $GH_REPO --body '["you@example.com"]'
+
+Make the GHCR package readable by the VM (no registry login on the host):
+
+  gh api -X PATCH /user/packages/container/demo-cours-docker-intro%2Fapp -f visibility=public
 
 Set the Grafana admin password (the prompt keeps it out of the shell history):
 

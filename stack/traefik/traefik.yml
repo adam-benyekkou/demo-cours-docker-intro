@@ -10,11 +10,6 @@ accessLog:
     headers:
       defaultMode: drop
 
-api:
-  dashboard: true
-  # Le dashboard écoute sur l'entrypoint `traefik` (8080), jamais publié.
-  insecure: true
-
 ping:
   entryPoint: traefik
 
@@ -40,7 +35,8 @@ providers:
   docker:
     endpoint: "tcp://socket-proxy:2375"
     exposedByDefault: false
-    network: edge
+    # Nom réel du réseau Docker : le projet compose est épinglé à `demo-stack`.
+    network: demo-stack_edge
     watch: true
   file:
     directory: /etc/traefik/dynamic
